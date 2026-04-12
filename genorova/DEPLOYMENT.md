@@ -258,3 +258,11 @@ pushpdwivedi911@gmail.com
 ---
 
 *Genorova AI v1.0 · Built with PyTorch · RDKit · ChEMBL · FastAPI · April 2026*
+
+---
+
+## Render Deployment Note (April 2026)
+
+- Keep Render service root at the repository root so `render.yaml` can run `pip install -r requirements.txt`.
+- If Render root is set to `genorova/`, dependency install is still deterministic because `genorova/requirements.txt` delegates to `../requirements.txt`.
+- Do not use `+cpu` torch pins in requirements files for standard PyPI installs on Render.

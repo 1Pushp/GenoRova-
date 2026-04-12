@@ -1,5 +1,9 @@
-﻿.venv/
+.venv/
 venv/
+genorova_env/
+**/.venv/
+**/venv/
+**/genorova_env/
 __pycache__/
 *.pyc
 *.pyo
@@ -7,3 +11,4 @@ outputs/models/
 outputs/genorova_memory.db
 docking/
 .claude/
+install_venv_packages.py
