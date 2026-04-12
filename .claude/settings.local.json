@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python -X utf8 scorer.py)"
-    ]
-  }
-}

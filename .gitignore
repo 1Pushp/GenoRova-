@@ -1,0 +1,9 @@
+﻿.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+outputs/models/
+outputs/genorova_memory.db
+docking/
+.claude/
