@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: genorova-ai
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd genorova && uvicorn src.api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0

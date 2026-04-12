@@ -3,7 +3,11 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
-outputs/models/
+*.pyd
+.env
+outputs/models/*.pt
 outputs/genorova_memory.db
 docking/
+*.log
 .claude/
+install_venv_packages.py
