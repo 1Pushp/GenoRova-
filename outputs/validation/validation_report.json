@@ -1,0 +1,74 @@
+{
+  "input_smiles": "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2",
+  "disease_target": "antibacterial",
+  "timestamp": "2026-04-12T02:39:59.440784",
+  "canonical_smiles": "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2",
+  "novelty": {
+    "status": "known",
+    "pubchem": {
+      "exact_match": true,
+      "exact_match_cid": 45378228,
+      "similar_compounds": [
+        45378228
+      ],
+      "status": "found_exact_match",
+      "error": null
+    },
+    "chembl": {
+      "similar_compounds": [],
+      "status": "no_match",
+      "error": null
+    }
+  },
+  "target": {
+    "name": "Bacterial DHFR (Dihydrofolate Reductase)",
+    "organism": "E. coli",
+    "pdb_id": "4Z4K",
+    "mechanism": "Inhibition of dihydrofolate reductase --> block folate synthesis --> DNA synthesis inhibition",
+    "clinical_relevance": "Trimethoprim-sulfamethoxazole (Bactrim) uses this mechanism",
+    "reasoning": "Sulfonamides are classic antimetabolites targeting bacterial DHFR"
+  },
+  "admet": {
+    "molecular_weight": 286.35,
+    "logp": 0.83,
+    "h_donor_count": 1,
+    "h_acceptor_count": 4,
+    "polar_surface_area": 81.86,
+    "rotatable_bonds": 4,
+    "aromatic_rings": 1,
+    "qed_score": 0.892,
+    "lipinski_violations": 0,
+    "passes_lipinski": true
+  },
+  "docking": {
+    "binding_affinity": -4.0,
+    "method": "Computational scoring (descriptor-based)",
+    "top_poses": 1,
+    "confidence": "LOW - no actual docking performed"
+  },
+  "comparison": {
+    "sulfamethoxazole": 0.182,
+    "sulfadiazine": 0.117,
+    "sulfacetamide": 0.154,
+    "sulfisoxazole": 0.109,
+    "average_similarity": 0.14
+  },
+  "verdict": {
+    "viable": false,
+    "recommendation": "NOT VIABLE",
+    "reasoning": [
+      "[FAIL] Not novel (exact match in PubChem)",
+      "[PASS] Passes Lipinski Rule of 5 (0 violations)",
+      "[PASS] Excellent drug-likeness (QED: 0.892)",
+      "[FAIL] Poor predicted binding (-4.00 kcal/mol)",
+      "[WARN] Structurally distinct from known drugs (may be difficult to optimize)"
+    ],
+    "score": -40.0,
+    "next_steps": [
+      "Reject this molecule",
+      "Retrain Genorova with higher binding affinity thresholds",
+      "Generate new candidates"
+    ]
+  },
+  "status": "completed"
+}

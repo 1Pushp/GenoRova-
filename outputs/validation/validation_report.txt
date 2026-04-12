@@ -1,0 +1,48 @@
+======================================================================
+GENOROVA AI - DRUG CANDIDATE VALIDATION REPORT
+======================================================================
+
+Input SMILES: COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2
+Canonical SMILES: COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2
+Disease Target: antibacterial
+
+NOVELTY STATUS
+  Status: known
+
+TARGET SELECTION
+  Name: Bacterial DHFR (Dihydrofolate Reductase)
+  PDB ID: 4Z4K
+  Mechanism: Inhibition of dihydrofolate reductase --> block folate synthesis --> DNA synthesis inhibition
+
+ADMET PROPERTIES
+  molecular_weight: 286.35
+  logp: 0.83
+  h_donor_count: 1
+  h_acceptor_count: 4
+  polar_surface_area: 81.86
+  rotatable_bonds: 4
+  aromatic_rings: 1
+  qed_score: 0.892
+  lipinski_violations: 0
+  passes_lipinski: True
+
+DOCKING RESULTS
+  Binding Affinity: -4.0 kcal/mol
+  Method: Computational scoring (descriptor-based)
+
+FINAL VERDICT
+  Recommendation: NOT VIABLE
+  Score: -40.0/100
+  Viable: NO
+
+REASONING
+  [FAIL] Not novel (exact match in PubChem)
+  [PASS] Passes Lipinski Rule of 5 (0 violations)
+  [PASS] Excellent drug-likeness (QED: 0.892)
+  [FAIL] Poor predicted binding (-4.00 kcal/mol)
+  [WARN] Structurally distinct from known drugs (may be difficult to optimize)
+
+NEXT STEPS
+  1. Reject this molecule
+  2. Retrain Genorova with higher binding affinity thresholds
+  3. Generate new candidates
