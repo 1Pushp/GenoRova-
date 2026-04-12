@@ -1,0 +1,44 @@
+rank,smiles,molecular_weight,logp,hbd,hba,tpsa,qed_score,sa_score,passes_lipinski,clinical_score,recommendation
+1,CCC(cc(CCcCcccccccccccccc,294.8,12.19,0,0,0.0,0.746,3.25,False,0.6144,Strong candidate
+2,CCC(cc(CCcCcccccccccccCcc,294.8,12.19,0,0,0.0,0.746,3.25,False,0.6144,Strong candidate
+3,CCC(cc(CCcccccccccccccCcc,294.8,12.19,0,0,0.0,0.746,3.25,False,0.6144,Strong candidate
+4,CCC(cc(CCcCcccccccccccCccc,307.6,12.72,0,0,0.0,0.744,3.3,False,0.5767,Borderline
+5,CCC(ccCCCcCcccccccccccCcc,307.6,12.72,0,0,0.0,0.744,3.3,False,0.5767,Borderline
+6,CCC(cc(CCcccccccccccCcCccc,307.6,12.72,0,0,0.0,0.744,3.3,False,0.5767,Borderline
+7,CCC(ccCCCcCcccccccccccccc,307.6,12.72,0,0,0.0,0.744,3.3,False,0.5767,Borderline
+8,CCC(ccCCCcccccccccccccCcc,307.6,12.72,0,0,0.0,0.744,3.3,False,0.5767,Borderline
+9,CCC(ccCCCcCcccccccccccCccc,320.4,13.25,0,0,0.0,0.733,3.35,False,0.5751,Borderline
+10,CCC(ccCCCcccccccccccCcCccc,320.4,13.25,0,0,0.0,0.733,3.35,False,0.5751,Borderline
+11,CCC(ccCCCcCcccccccccCcCccc,320.4,13.25,0,0,0.0,0.733,3.35,False,0.5751,Borderline
+12,CCC(cc(CCcCcccccccccCcCcccc,320.4,13.25,0,0,0.0,0.733,3.35,False,0.5751,Borderline
+13,CCC(ccCCCcCcccccccccCcCcccc,333.3,13.78,0,0,0.0,0.722,3.4,False,0.5736,Borderline
+14,CCC(ccCCCcccccccccccccccc,307.6,12.72,0,0,0.0,0.744,3.6,False,0.5667,Borderline
+15,CCC(cc(CCcCccccccccccccccc,307.6,12.72,0,0,0.0,0.744,3.6,False,0.5667,Borderline
+16,CCC(cc(CCcccccccccccccCccc,307.6,12.72,0,0,0.0,0.744,3.6,False,0.5667,Borderline
+17,CCC(cc(CCccccccccccccccccc,307.6,12.72,0,0,0.0,0.744,3.6,False,0.5667,Borderline
+18,CCC(ccCCCcccccccccccCccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+19,CCC(ccCCCcccccccccccccCccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+20,CCC(cc(CCcccccccccccccCcccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+21,CCC(cc(CCcccccccccccCcccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+22,CCC(ccCCCcCccccccccccccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+23,CCC(ccCCCCcccccccccccccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+24,CCC(ccCCCccccccccccccccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+25,CCC(cc(CCcCcccccccccccccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+26,CCC(cc(CCcCcccccccccccCcccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+27,CCC(cc(CCcccccccccccccccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+28,CCC(ccCCCcccccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+29,CCC(ccCCCcCcccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+30,CCC(ccCCCcCcccccccccccCcccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+31,CCC(ccCCCcccccccccccccCcccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+32,CCC(ccCCCCCcccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+33,CCC(ccCCCcCcccccccccCcccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+34,CCC(cc(CCcCccccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+35,CCC(cc(CCcCcccccccccccCccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+36,CCC(cc(CCcccccccccccCccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+37,CCC(ccCCCCccccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+38,CCC(ccCCCcccccccccccCcCcccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+39,CCC(cc(CCccccccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+40,CCC(ccCCCcCcccccccccccCccccc,346.1,14.31,0,0,0.0,0.712,3.75,False,0.5622,Borderline
+41,CCC(ccCCCcccccccccccccCccccc,346.1,14.31,0,0,0.0,0.712,3.75,False,0.5622,Borderline
+42,CCC(ccCCCccccccccccccccccccc,346.1,14.31,0,0,0.0,0.712,3.75,False,0.5622,Borderline
+43,CCC(ccCCCcCccccccccccccccccc,346.1,14.31,0,0,0.0,0.712,3.75,False,0.5622,Borderline
