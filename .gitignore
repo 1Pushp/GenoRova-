@@ -12,3 +12,5 @@ outputs/genorova_memory.db
 docking/
 .claude/
 install_venv_packages.py
+app/frontend/node_modules/
+app/frontend/dist/
