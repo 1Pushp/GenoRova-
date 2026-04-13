@@ -22,11 +22,8 @@ DATE:   April 2026
 import sys
 import sqlite3
 import csv
-import io
-import time
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 # Make src/ importable
 sys.path.insert(0, str(Path(__file__).parent))
@@ -43,6 +40,13 @@ GENERATED_DIR = OUTPUT_DIR / "generated"
 MODELS_DIR    = OUTPUT_DIR / "models"
 DB_PATH       = OUTPUT_DIR / "genorova_memory.db"
 REPORT_PATH   = OUTPUT_DIR / "genorova_report.html"
+
+BEST_MOLECULE = "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2"
+BEST_SCORE = 0.9649
+BEST_MW = 286
+BEST_DOCKING = -5.041
+BEST_CA7_KI = "6.4 nM"
+TOTAL_MOLECULES = 100
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
@@ -190,6 +194,12 @@ def generate(req: GenerateRequest):
     }
 
 
+@app.post("/api/generate", summary="Generate drug candidates (SaaS API)")
+def api_generate(req: GenerateRequest):
+    """Alias route for the SaaS frontend deployed against src.api:app."""
+    return generate(req)
+
+
 # ── ENDPOINT: POST /score ─────────────────────────────────────────────────────
 
 @app.post("/score", summary="Score a molecule")
@@ -204,7 +214,7 @@ def score(req: ScoreRequest):
     """
     try:
         from rdkit import Chem
-        from rdkit.Chem import Descriptors, QED, Crippen, rdMolDescriptors
+        from rdkit.Chem import Descriptors, QED, Crippen
         from scorer import genorova_clinical_score, calculate_sa_score
 
         mol = Chem.MolFromSmiles(req.smiles)
@@ -255,6 +265,12 @@ def score(req: ScoreRequest):
         raise HTTPException(status_code=500, detail=f"Scoring failed: {e}")
 
 
+@app.post("/api/score", summary="Score a molecule (SaaS API)")
+def api_score(req: ScoreRequest):
+    """Alias route for the SaaS frontend deployed against src.api:app."""
+    return score(req)
+
+
 # ── ENDPOINT: GET /best_molecules ─────────────────────────────────────────────
 
 @app.get("/best_molecules", summary="Top 10 molecules discovered")
@@ -303,6 +319,25 @@ def best_molecules(n: int = 10):
             }
             for i, r in enumerate(rows)
         ],
+    }
+
+
+@app.get("/api/best", summary="Top 5 molecules for SaaS frontend")
+def api_best():
+    """Return the top 5 ranked molecules in a stable JSON payload."""
+    return best_molecules(n=5)
+
+
+@app.get("/api/stats", summary="Platform statistics for SaaS frontend")
+def api_stats():
+    """Return stable top-level platform statistics used by the SaaS UI."""
+    return {
+        "total_molecules": TOTAL_MOLECULES,
+        "best_score": BEST_SCORE,
+        "best_molecule": BEST_MOLECULE,
+        "best_molecular_weight": BEST_MW,
+        "best_docking_affinity": BEST_DOCKING,
+        "best_ca7_ki": BEST_CA7_KI,
     }
 
 
