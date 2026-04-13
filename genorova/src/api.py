@@ -29,7 +29,8 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent))
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ── Project paths ────────────────────────────────────────────────────────────
@@ -40,6 +41,9 @@ GENERATED_DIR = OUTPUT_DIR / "generated"
 MODELS_DIR    = OUTPUT_DIR / "models"
 DB_PATH       = OUTPUT_DIR / "genorova_memory.db"
 REPORT_PATH   = OUTPUT_DIR / "genorova_report.html"
+FRONTEND_DIST_DIR = ROOT_DIR.parent / "app" / "frontend" / "dist"
+FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
+FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 
 BEST_MOLECULE = "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2"
 BEST_SCORE = 0.9649
@@ -63,6 +67,9 @@ app = FastAPI(
         "email": "pushpdwivedi911@gmail.com",
     },
 )
+
+if FRONTEND_ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS_DIR)), name="frontend-assets")
 
 
 # ── Request / Response models ────────────────────────────────────────────────
@@ -388,14 +395,62 @@ def _store_molecule(smiles, qed, sa, mw, logp, score, recommendation):
         pass
 
 
-# ── Root redirect ─────────────────────────────────────────────────────────────
+def _frontend_is_built() -> bool:
+    """Return True when the compiled React frontend exists."""
+    return FRONTEND_INDEX_PATH.exists()
 
-@app.get("/", include_in_schema=False)
-def root():
-    return JSONResponse({
+
+def _frontend_file(path: str) -> Path | None:
+    """Safely resolve a file inside the compiled frontend directory."""
+    candidate = (FRONTEND_DIST_DIR / path).resolve()
+    try:
+        candidate.relative_to(FRONTEND_DIST_DIR.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def _api_home_payload() -> dict:
+    """Stable metadata payload for the API surface."""
+    return {
         "name":    "Genorova AI Drug Discovery API",
         "version": "1.0.0",
         "docs":    "/docs",
         "health":  "/health",
         "report":  "/report",
-    })
+    }
+
+
+# ── Root redirect ─────────────────────────────────────────────────────────────
+
+@app.get("/api", include_in_schema=False)
+def api_root():
+    """Expose API metadata without taking over the site root."""
+    return JSONResponse(_api_home_payload())
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    if _frontend_is_built():
+        return FileResponse(FRONTEND_INDEX_PATH)
+    return JSONResponse(_api_home_payload())
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def frontend_routes(full_path: str):
+    """
+    Serve the built SPA for client-side routes while leaving API and docs
+    endpoints on FastAPI's normal routing table.
+    """
+    if not _frontend_is_built():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    requested_file = _frontend_file(full_path)
+    if requested_file is not None:
+        return FileResponse(requested_file)
+
+    filename = Path(full_path).name
+    if full_path.startswith("api/") or "." in filename:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    return FileResponse(FRONTEND_INDEX_PATH)

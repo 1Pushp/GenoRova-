@@ -1,21 +1,14 @@
 services:
   - type: web
-    name: genorova-ai-backend
+    name: genorova
     runtime: python
-    rootDir: app/backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    rootDir: genorova
+    buildCommand: cd ../app/frontend && npm ci && npm run build && cd ../../genorova && pip install -r requirements.txt
+    startCommand: uvicorn src.api:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: GENOROVA_API_URL
-        value: https://genorova-ai.onrender.com
-
-  - type: static
-    name: genorova-ai-frontend
-    rootDir: app/frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
       - key: VITE_API_BASE_URL
-        sync: false
+        value: ""
