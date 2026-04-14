@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./PlatformApp";
+import App from "./GenorovaChatAppV11";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(

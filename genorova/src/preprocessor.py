@@ -45,9 +45,10 @@ from typing import Tuple, Dict, List
 # CONSTANTS
 # ============================================================================
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
 MAX_SMILES_LENGTH = 120  # Maximum length of SMILES string (pad/truncate to this)
 PAD_TOKEN = "<pad>"      # Special token for padding
-VOCAB_OUTPUT_PATH = "outputs/vocabulary.json"
+VOCAB_OUTPUT_PATH = ROOT_DIR / "outputs" / "vocab.json"
 
 
 # ============================================================================
@@ -146,7 +147,11 @@ def encode_smiles(smiles: str, char2idx: Dict[str, int], max_length: int = MAX_S
     return one_hot
 
 
-def preprocess_batch(smiles_list: List[str], char2idx: Dict[str, int]) -> np.ndarray:
+def preprocess_batch(
+    smiles_list: List[str],
+    char2idx: Dict[str, int],
+    max_length: int = MAX_SMILES_LENGTH,
+) -> np.ndarray:
     """
     Encode a batch of SMILES strings into one-hot tensors.
     
@@ -159,7 +164,7 @@ def preprocess_batch(smiles_list: List[str], char2idx: Dict[str, int]) -> np.nda
     """
     batch = []
     for smiles in smiles_list:
-        one_hot = encode_smiles(smiles, char2idx)
+        one_hot = encode_smiles(smiles, char2idx, max_length=max_length)
         batch.append(one_hot)
     
     return np.array(batch, dtype=np.float32)

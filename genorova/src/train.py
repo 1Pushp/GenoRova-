@@ -62,10 +62,20 @@ GRADIENT_CLIP = 1.0
 CHECKPOINT_EVERY = 10
 EARLY_STOPPING_PATIENCE = 10
 
-# KL annealing
-KL_WEIGHT_START = 0.0
-KL_WEIGHT_INCREMENT = 0.01
-KL_WEIGHT_MAX = 0.005   # low weight prevents posterior collapse (was 0.5)
+# KL annealing — linear warm-up schedule
+# kl_weight rises linearly from 0.0 at epoch 1 to KL_WEIGHT_TARGET at
+# epoch KL_WARMUP_EPOCHS, then holds steady for all remaining epochs.
+#
+# Why warm up instead of a fixed increment?
+#   A fixed increment (old code: += 0.01 each epoch, max 0.005) hit the
+#   ceiling after a single epoch and never reached the intended target of
+#   0.5, leaving the latent space badly under-regularised.  The warm-up
+#   schedule is deterministic: at epoch e the weight is exactly
+#       min(KL_WEIGHT_TARGET, KL_WEIGHT_TARGET * e / KL_WARMUP_EPOCHS)
+#   so there is no risk of the increment overshooting or stalling.
+KL_WEIGHT_START   = 0.0   # weight at epoch 0 (before any training)
+KL_WEIGHT_TARGET  = 0.5   # final weight held after warm-up completes
+KL_WARMUP_EPOCHS  = 50    # epochs to ramp from 0 → KL_WEIGHT_TARGET
 
 # Sample generation
 SAMPLE_EVERY = 10
@@ -170,9 +180,22 @@ class VAETrainer:
         return self.optimizer.param_groups[0]['lr']
     
     def _update_kl_weight(self):
-        """Update KL weight (annealing)."""
-        if self.kl_weight < KL_WEIGHT_MAX:
-            self.kl_weight = min(self.kl_weight + KL_WEIGHT_INCREMENT, KL_WEIGHT_MAX)
+        """
+        Advance the KL warm-up schedule by one epoch.
+
+        Linear warm-up: weight = KL_WEIGHT_TARGET * (epoch / KL_WARMUP_EPOCHS),
+        capped at KL_WEIGHT_TARGET once warm-up is complete.
+
+        Called at the END of each epoch (after self.current_epoch has been
+        incremented), so the weight used during epoch e+1 reflects e completed
+        epochs of warm-up.
+        """
+        if self.current_epoch >= KL_WARMUP_EPOCHS:
+            # Warm-up complete — hold at target for all subsequent epochs
+            self.kl_weight = KL_WEIGHT_TARGET
+        else:
+            # Linear ramp: rises by (KL_WEIGHT_TARGET / KL_WARMUP_EPOCHS) per epoch
+            self.kl_weight = KL_WEIGHT_TARGET * (self.current_epoch / KL_WARMUP_EPOCHS)
     
     def train_epoch(self, train_loader: DataLoader) -> Tuple[float, float, float]:
         """
@@ -362,7 +385,7 @@ class VAETrainer:
         print(f"Total epochs: {num_epochs}")
         print(f"Batch size: {BATCH_SIZE}")
         print(f"Initial learning rate: {LEARNING_RATE}")
-        print(f"KL annealing: {KL_WEIGHT_START} → {KL_WEIGHT_MAX} (increment: {KL_WEIGHT_INCREMENT})")
+        print(f"KL annealing: {KL_WEIGHT_START} → {KL_WEIGHT_TARGET} (linear warm-up over {KL_WARMUP_EPOCHS} epochs)")
         print(f"{'='*70}\n")
         
         start_time = time.time()
@@ -529,7 +552,7 @@ def main():
     print(f"Logs saved to: {LOG_DIR}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and False:
     main()
 """
 Genorova AI — VAE Model Training Engine
@@ -735,7 +758,8 @@ def train_epoch(model, train_loader, optimizer, epoch, logger, kl_weight=KL_WEIG
     
     print(f"\n[TRAIN] Epoch {epoch + 1} — Starting training...")
     
-    for batch_idx, (x, smiles_list) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}")):
+    for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}")):
+        x = batch[0] if isinstance(batch, (list, tuple)) else batch
         # Move to device
         x = x.to(DEVICE)
         
@@ -804,7 +828,8 @@ def validate(model, val_loader, epoch, logger, kl_weight=KL_WEIGHT):
     print(f"[VALIDATE] Epoch {epoch + 1} — Validating...")
     
     with torch.no_grad():
-        for x, smiles_list in tqdm(val_loader, desc=f"Validation"):
+        for batch in tqdm(val_loader, desc=f"Validation"):
+            x = batch[0] if isinstance(batch, (list, tuple)) else batch
             x = x.to(DEVICE)
             
             # Forward pass
@@ -1093,7 +1118,7 @@ def train(data_path, epochs=EPOCHS, batch_size=BATCH_SIZE, learning_rate=LEARNIN
 # COMMAND LINE INTERFACE
 # ============================================================================
 
-if __name__ == "__main__":
+if __name__ == "__main__" and False:
     parser = argparse.ArgumentParser(description="Train Genorova VAE model")
     parser.add_argument("--data", type=str, default="data/processed/test_smiles.csv",
                         help="Path to SMILES CSV file")
@@ -1113,3 +1138,318 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         learning_rate=args.learning_rate
     )
+
+
+# ============================================================================
+# DATASET-DRIVEN TRAINING ENTRY POINT
+# ============================================================================
+
+import random
+from typing import Dict
+
+from data_loader import load_smiles_dataset
+from preprocessor import (
+    MAX_SMILES_LENGTH as DEFAULT_MAX_SMILES_LENGTH,
+    SmilesDataset,
+    build_vocab,
+    preprocess_batch,
+    save_vocab,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_DIR = PROJECT_ROOT / "outputs"
+MODEL_DIR = OUTPUT_DIR / "models"
+LOG_DIR = OUTPUT_DIR / "logs"
+VOCAB_PATH = OUTPUT_DIR / "vocab.json"
+
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+NUM_WORKERS = 0
+PIN_MEMORY = torch.cuda.is_available()
+TRAIN_SPLIT = 0.9
+VAL_SPLIT = 0.1
+SEED = 42
+
+
+def set_seed(seed: int = SEED) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def setup_training_logging(log_dir: Path = LOG_DIR):
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"training_{timestamp}.log"
+
+    logger = logging.getLogger("genorova.train.realdata")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    file_handler = logging.FileHandler(log_file)
+    stream_handler = logging.StreamHandler()
+    file_handler.setFormatter(formatter)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.propagate = False
+    return logger, log_file
+
+
+def summarize_dataset(
+    df: pd.DataFrame,
+    train_size: int,
+    val_size: int,
+    vocab: Dict[str, int],
+    max_length: int,
+    logger,
+) -> None:
+    lengths = df["smiles"].str.len()
+    unique_chars = sorted(char for char in vocab.keys() if char != "<pad>")
+
+    print("\n[DATASET] Training corpus summary")
+    print(f"  Total molecules: {len(df)}")
+    print(f"  Train/val split: {train_size} / {val_size}")
+    print(f"  Vocab size: {len(vocab)}")
+    print(f"  Unique characters: {''.join(unique_chars)}")
+    print(
+        f"  SMILES length stats: min={lengths.min()} max={lengths.max()} "
+        f"mean={lengths.mean():.2f} p95={lengths.quantile(0.95):.0f}"
+    )
+    print(f"  Max sequence length used by model: {max_length}")
+    print("  Random sample molecules:")
+    for smiles in df["smiles"].sample(n=min(5, len(df)), random_state=SEED).tolist():
+        print(f"    {smiles}")
+
+    logger.info("Total molecules: %s", len(df))
+    logger.info("Train/val split sizes: %s / %s", train_size, val_size)
+    logger.info("Vocab size: %s", len(vocab))
+    logger.info("Unique characters: %s", "".join(unique_chars))
+    logger.info(
+        "SMILES length distribution: min=%s max=%s mean=%.2f p95=%.0f max_length=%s",
+        int(lengths.min()),
+        int(lengths.max()),
+        lengths.mean(),
+        lengths.quantile(0.95),
+        max_length,
+    )
+
+
+def train_real_dataset(
+    dataset_name: str = "moses",
+    epochs: int = EPOCHS,
+    batch_size: int = BATCH_SIZE,
+    learning_rate: float = LEARNING_RATE,
+    max_samples: int = 50000,
+    min_len: int = 10,
+    max_len: int = 100,
+):
+    """
+    Train the VAE on a real molecular dataset with the existing loop structure.
+    """
+    set_seed(SEED)
+    logger, log_file = setup_training_logging()
+
+    print("[MAIN] Starting Genorova VAE training on a real molecular dataset")
+    print(f"[MAIN] Dataset: {dataset_name}")
+    print(f"[MAIN] Device: {DEVICE}")
+    logger.info("Training started: dataset=%s max_samples=%s", dataset_name, max_samples)
+
+    dataset_df = load_smiles_dataset(
+        name=dataset_name,
+        max_samples=max_samples,
+        min_len=min_len,
+        max_len=max_len,
+    )
+    load_stats = dataset_df.attrs.get("load_stats", {})
+
+    smiles_list = dataset_df["smiles"].tolist()
+    char2idx, idx2char = build_vocab(smiles_list)
+    save_vocab(char2idx, VOCAB_PATH)
+
+    observed_max_length = int(dataset_df["smiles"].str.len().max())
+    model_max_length = max(DEFAULT_MAX_SMILES_LENGTH, observed_max_length)
+    encoded_data = preprocess_batch(smiles_list, char2idx, max_length=model_max_length)
+    dataset = SmilesDataset(encoded_data, smiles_list)
+
+    train_size = max(1, int(TRAIN_SPLIT * len(dataset)))
+    val_size = len(dataset) - train_size
+    if val_size == 0:
+        val_size = 1
+        train_size = len(dataset) - 1
+
+    summarize_dataset(dataset_df, train_size, val_size, char2idx, model_max_length, logger)
+    logger.info("Loader stats: %s", load_stats)
+
+    train_set, val_set = random_split(
+        dataset,
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(SEED),
+    )
+
+    train_loader = DataLoader(
+        train_set,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=PIN_MEMORY,
+    )
+    val_loader = DataLoader(
+        val_set,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+        pin_memory=PIN_MEMORY,
+    )
+
+    model = VAE(vocab_size=len(char2idx), latent_dim=LATENT_DIM, max_length=model_max_length).to(DEVICE)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=LR_DECAY)
+
+    best_val_loss = float("inf")
+    patience_counter = 0
+    all_metrics = []
+    epoch_times = []
+    checkpoint_path = MODEL_DIR / "genorova_best.pt"
+
+    for epoch in range(epochs):
+        print(f"\n{'=' * 70}")
+        print(f"EPOCH {epoch + 1}/{epochs}")
+        print(f"{'=' * 70}")
+
+        if KL_ANNEALING:
+            effective_warmup_epochs = max(KL_WARMUP_EPOCHS, 100)
+            kl_weight = min(KL_WEIGHT_TARGET, KL_WEIGHT_TARGET * epoch / effective_warmup_epochs)
+        else:
+            kl_weight = KL_WEIGHT_TARGET
+
+        epoch_start = time.time()
+        train_metrics = train_epoch(model, train_loader, optimizer, epoch, logger, kl_weight)
+        val_metrics = validate(model, val_loader, epoch, logger, kl_weight)
+        epoch_time = time.time() - epoch_start
+        epoch_times.append(epoch_time)
+
+        metrics = {
+            "epoch": epoch + 1,
+            "learning_rate": optimizer.param_groups[0]["lr"],
+            "kl_weight": kl_weight,
+            "epoch_seconds": epoch_time,
+            **train_metrics,
+            **val_metrics,
+        }
+        all_metrics.append(metrics)
+
+        print(f"\n[SUMMARY] Epoch {epoch + 1}")
+        print(f"  Train Loss: {train_metrics['loss']:.4f}")
+        print(f"  Recon Loss: {train_metrics['recon_loss']:.4f}")
+        print(f"  KL Loss: {train_metrics['kl_loss']:.4f}")
+        print(f"  Val Loss: {val_metrics['val_loss']:.4f}")
+        print(f"  Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
+        print(f"  KL Weight: {kl_weight:.4f}")
+        print(f"  Epoch Time (CPU/GPU wall): {epoch_time:.2f}s")
+
+        if (epoch + 1) % CHECKPOINT_EVERY == 0:
+            save_checkpoint(model, optimizer, epoch, val_metrics["val_loss"], model_dir=str(MODEL_DIR))
+
+        if val_metrics["val_loss"] < best_val_loss:
+            best_val_loss = val_metrics["val_loss"]
+            patience_counter = 0
+            checkpoint = {
+                "epoch": epoch + 1,
+                "model_state": model.state_dict(),
+                "model_state_dict": model.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "best_val_loss": best_val_loss,
+                "loss": best_val_loss,
+                "vocab_size": len(char2idx),
+                "max_length": model_max_length,
+                "dataset": dataset_name,
+            }
+            torch.save(checkpoint, checkpoint_path)
+            print(f"[CHECKPOINT] Saved best checkpoint: {checkpoint_path}")
+        else:
+            patience_counter += 1
+            if patience_counter >= EARLY_STOPPING_PATIENCE:
+                print(f"[EARLY STOPPING] No improvement for {EARLY_STOPPING_PATIENCE} epochs. Stopping training.")
+                logger.info("Early stopping at epoch %s", epoch + 1)
+                break
+
+        scheduler.step()
+
+    metrics_df = pd.DataFrame(all_metrics)
+    metrics_csv = LOG_DIR / "training_metrics.csv"
+    metrics_df.to_csv(metrics_csv, index=False)
+
+    final_checkpoint_path = MODEL_DIR / "genorova_final.pt"
+    final_checkpoint = {
+        "epoch": len(all_metrics),
+        "model_state": model.state_dict(),
+        "model_state_dict": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "best_val_loss": best_val_loss,
+        "loss": best_val_loss,
+        "vocab_size": len(char2idx),
+        "max_length": model_max_length,
+        "dataset": dataset_name,
+    }
+    torch.save(final_checkpoint, final_checkpoint_path)
+
+    print(f"\n{'=' * 70}")
+    print("TRAINING COMPLETE!")
+    print(f"{'=' * 70}")
+    print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Total epochs trained: {len(all_metrics)}")
+    print(f"Models saved to: {MODEL_DIR}")
+    print(f"Metrics saved to: {metrics_csv}")
+    print(f"Log saved to: {log_file}")
+
+    logger.info("Training complete. Best val loss: %.4f", best_val_loss)
+
+    return {
+        "metrics": all_metrics,
+        "metrics_csv": metrics_csv,
+        "log_file": log_file,
+        "best_checkpoint": checkpoint_path,
+        "final_checkpoint": final_checkpoint_path,
+        "vocab_path": VOCAB_PATH,
+        "load_stats": load_stats,
+        "model_max_length": model_max_length,
+        "device": str(DEVICE),
+        "epoch_times": epoch_times,
+    }
+
+
+def build_realdata_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Train Genorova VAE on a real molecular dataset.")
+    parser.add_argument("--dataset", default="moses", choices=["moses", "chembl_subset"])
+    parser.add_argument("--max-samples", type=int, default=50000)
+    parser.add_argument("--min-len", type=int, default=10)
+    parser.add_argument("--max-len", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
+    return parser
+
+
+def main_realdata() -> None:
+    args = build_realdata_parser().parse_args()
+    train_real_dataset(
+        dataset_name=args.dataset,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        max_samples=args.max_samples,
+        min_len=args.min_len,
+        max_len=args.max_len,
+    )
+
+
+if __name__ == "__main__":
+    main_realdata()

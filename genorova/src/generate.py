@@ -54,6 +54,7 @@ from preprocessor import load_vocab
 # Model and checkpoint
 MODEL_DIR = Path("outputs/models")
 CHECKPOINT_NAME = "genorova_best.pt"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Generation parameters
 NUM_MOLECULES_TO_GENERATE = 100
@@ -134,9 +135,15 @@ class MoleculeGenerator:
         self.checkpoint = torch.load(checkpoint_path, map_location=self.device)
         
         # Load vocabulary
-        vocab_path = Path("outputs/vocabulary.json")
-        if not vocab_path.exists():
-            raise FileNotFoundError(f"Vocabulary not found: {vocab_path}")
+        vocab_candidates = [
+            PROJECT_ROOT / "outputs" / "vocab.json",
+            PROJECT_ROOT / "outputs" / "vocabulary.json",
+            Path("outputs/vocab.json"),
+            Path("outputs/vocabulary.json"),
+        ]
+        vocab_path = next((path for path in vocab_candidates if path.exists()), None)
+        if vocab_path is None:
+            raise FileNotFoundError("Vocabulary not found in outputs/vocab.json or outputs/vocabulary.json")
         
         self.char2idx, self.idx2char = load_vocab(vocab_path)
         vocab_size = len(self.char2idx)

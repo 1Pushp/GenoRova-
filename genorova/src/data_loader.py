@@ -374,7 +374,7 @@ def load_and_process(input_path=None, smiles_list=None, output_path=None):
 # EXAMPLE USAGE
 # ============================================================================
 
-if __name__ == "__main__":
+if __name__ == "__main__" and False:
 
     # Test data: 5 known valid SMILES strings for common drugs
     test_smiles = [
@@ -400,3 +400,230 @@ if __name__ == "__main__":
     print(df_test.to_string(index=False))
 
     print("\n[SUCCESS] Data loader test completed successfully!")
+
+
+# ============================================================================
+# MODERN DATASET LOADER FOR MOSES / ChEMBL SUBSET
+# ============================================================================
+
+import argparse
+import gzip
+import os
+from typing import Dict, Iterable, Optional
+
+import urllib.request
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+DATA_DIR = ROOT_DIR / "data"
+MOSES_DIR = DATA_DIR / "moses"
+CHEMBL_DIR = DATA_DIR / "chembl_subset"
+DEFAULT_TIMEOUT = 120
+
+MOSES_URLS: Dict[str, Iterable[str]] = {
+    "train": (
+        "https://media.githubusercontent.com/media/molecularsets/moses/master/moses/dataset/data/train.csv.gz",
+        "https://raw.githubusercontent.com/molecularsets/moses/master/moses/dataset/data/train.csv.gz",
+    ),
+    "test": (
+        "https://media.githubusercontent.com/media/molecularsets/moses/master/moses/dataset/data/test.csv.gz",
+        "https://raw.githubusercontent.com/molecularsets/moses/master/moses/dataset/data/test.csv.gz",
+    ),
+}
+
+
+def _download_to_path(urls: Iterable[str], destination: Path) -> Path:
+    """Try a sequence of URLs until one successfully downloads."""
+    last_error: Optional[Exception] = None
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    for url in urls:
+        try:
+            with urllib.request.urlopen(url, timeout=DEFAULT_TIMEOUT) as response:
+                with open(destination, "wb") as handle:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+            return destination
+        except Exception as exc:
+            last_error = exc
+            destination.unlink(missing_ok=True)
+
+    raise RuntimeError(f"Failed to download dataset file to {destination}") from last_error
+
+
+def _gunzip_file(source_gz: Path, destination_csv: Path) -> Path:
+    destination_csv.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(source_gz, "rb") as src, open(destination_csv, "wb") as dst:
+        dst.write(src.read())
+    return destination_csv
+
+
+def _find_smiles_column(df: pd.DataFrame) -> str:
+    for column in df.columns:
+        if column.lower() in {"smiles", "smi", "smile"}:
+            return column
+    return df.columns[0]
+
+
+def download_moses() -> Dict[str, Path]:
+    """
+    Fetch and cache the MOSES train/test splits under genorova/data/moses/.
+
+    Returns:
+        dict: {"train": Path(...), "test": Path(...)}
+    """
+    cached = {
+        "train": MOSES_DIR / "train.csv",
+        "test": MOSES_DIR / "test.csv",
+    }
+    if all(path.exists() for path in cached.values()):
+        return cached
+
+    for split, urls in MOSES_URLS.items():
+        csv_path = cached[split]
+        if csv_path.exists():
+            continue
+        gz_path = MOSES_DIR / f"{split}.csv.gz"
+        _download_to_path(urls, gz_path)
+        _gunzip_file(gz_path, csv_path)
+        gz_path.unlink(missing_ok=True)
+
+    return cached
+
+
+def _load_chembl_subset(max_samples: Optional[int] = None) -> pd.DataFrame:
+    """
+    Load a cached ChEMBL subset or download one from GENOROVA_CHEMBL_SUBSET_URL.
+    """
+    local_candidates = [
+        CHEMBL_DIR / "chembl_subset.csv",
+        DATA_DIR / "chembl_subset.csv",
+    ]
+
+    env_url = os.environ.get("GENOROVA_CHEMBL_SUBSET_URL")
+    if env_url:
+        target = CHEMBL_DIR / "chembl_subset.csv"
+        if not target.exists():
+            _download_to_path((env_url,), target)
+        local_candidates.insert(0, target)
+
+    for path in local_candidates:
+        if path.exists():
+            df = pd.read_csv(path)
+            smiles_column = _find_smiles_column(df)
+            result = pd.DataFrame({"smiles": df[smiles_column].astype(str)})
+            if max_samples is not None and len(result) > max_samples:
+                result = result.sample(n=max_samples, random_state=42).reset_index(drop=True)
+            return result
+
+    raise FileNotFoundError(
+        "ChEMBL subset not found. Place a CSV at genorova/data/chembl_subset/chembl_subset.csv "
+        "or set GENOROVA_CHEMBL_SUBSET_URL."
+    )
+
+
+def load_smiles_dataset(
+    name: str,
+    max_samples: Optional[int] = None,
+    min_len: int = 10,
+    max_len: int = 100,
+) -> pd.DataFrame:
+    """
+    Load a benchmark molecular dataset as a DataFrame with a `smiles` column.
+
+    The returned DataFrame has dataset filtering metadata stored in
+    `df.attrs["load_stats"]`.
+    """
+    dataset_name = name.lower().strip()
+
+    if dataset_name == "moses":
+        cached_files = download_moses()
+        raw_df = pd.read_csv(cached_files["train"])
+        smiles_column = _find_smiles_column(raw_df)
+        source_df = pd.DataFrame({"smiles": raw_df[smiles_column].astype(str)})
+    elif dataset_name in {"chembl", "chembl_subset"}:
+        source_df = _load_chembl_subset(max_samples=max_samples)
+    else:
+        raise ValueError(f"Unsupported dataset '{name}'. Use 'moses' or 'chembl_subset'.")
+
+    total_rows = len(source_df)
+    source_df["smiles"] = source_df["smiles"].astype(str).str.strip()
+    source_df = source_df[source_df["smiles"] != ""].drop_duplicates(subset=["smiles"]).reset_index(drop=True)
+    deduped_rows = len(source_df)
+
+    lengths = source_df["smiles"].str.len()
+    length_filtered = source_df[lengths.between(min_len, max_len)].copy().reset_index(drop=True)
+    removed_by_length = deduped_rows - len(length_filtered)
+
+    if max_samples is not None and len(length_filtered) > max_samples:
+        sample_pool = min(len(length_filtered), max(max_samples * 2, max_samples))
+        length_filtered = length_filtered.sample(n=sample_pool, random_state=42).reset_index(drop=True)
+
+    valid_smiles = []
+    invalid_parse_count = 0
+
+    for smiles in length_filtered["smiles"]:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            invalid_parse_count += 1
+            continue
+        valid_smiles.append(Chem.MolToSmiles(mol, canonical=True))
+
+    filtered_df = pd.DataFrame({"smiles": valid_smiles}).drop_duplicates(subset=["smiles"]).reset_index(drop=True)
+
+    post_validation_rows = len(filtered_df)
+    if max_samples is not None and len(filtered_df) > max_samples:
+        filtered_df = filtered_df.sample(n=max_samples, random_state=42).reset_index(drop=True)
+
+    filtered_df.attrs["load_stats"] = {
+        "dataset": dataset_name,
+        "source_rows": total_rows,
+        "deduplicated_rows": deduped_rows,
+        "removed_by_length": removed_by_length,
+        "invalid_parse_count": invalid_parse_count,
+        "post_validation_rows": post_validation_rows,
+        "returned_rows": len(filtered_df),
+        "rdkit_warning_count": 0,
+        "min_len": min_len,
+        "max_len": max_len,
+    }
+
+    return filtered_df
+
+
+def _build_cli() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Download and validate molecular datasets for Genorova.")
+    parser.add_argument("--dataset", default="moses", choices=["moses", "chembl_subset"])
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--min-len", type=int, default=10)
+    parser.add_argument("--max-len", type=int, default=100)
+    return parser
+
+
+def main() -> None:
+    args = _build_cli().parse_args()
+    df = load_smiles_dataset(
+        name=args.dataset,
+        max_samples=args.max_samples,
+        min_len=args.min_len,
+        max_len=args.max_len,
+    )
+    stats = df.attrs.get("load_stats", {})
+
+    print(f"Dataset: {args.dataset}")
+    print(f"Molecules returned: {len(df)}")
+    print(f"Filtered by length: {stats.get('removed_by_length', 0)}")
+    print(f"Invalid RDKit parses removed: {stats.get('invalid_parse_count', 0)}")
+    if not df.empty:
+        lengths = df["smiles"].str.len()
+        print(f"Length stats: min={lengths.min()} max={lengths.max()} mean={lengths.mean():.2f}")
+        print("Sample molecules:")
+        for smiles in df["smiles"].head(5):
+            print(f"  {smiles}")
+
+
+if __name__ == "__main__":
+    main()
