@@ -48,13 +48,8 @@ FRONTEND_DIST_DIR = ROOT_DIR.parent / "app" / "frontend" / "dist"
 FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 
-BEST_MOLECULE = "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2"
-BEST_SCORE = 0.9649
-BEST_MW = 286
-BEST_DOCKING = -5.041
-BEST_CA7_KI = "6.4 nM"
-TOTAL_MOLECULES = 100
 CHAT_SESSION_MEMORY: dict[str, dict[str, Any]] = {}
+BEST_MOLECULE = "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2"
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
@@ -412,14 +407,92 @@ def api_best():
 
 @app.get("/api/stats", summary="Platform statistics for SaaS frontend")
 def api_stats():
-    """Return stable top-level platform statistics used by the SaaS UI."""
+    """
+    Return live platform statistics computed from the molecule database and
+    CSV outputs.  Never returns hardcoded values — if no molecules have been
+    generated yet the endpoint says so explicitly.
+    """
+    total = 0
+    best_score = None
+    best_molecule = None
+    best_mw = None
+    avg_qed = None
+    avg_sa = None
+    data_source = "none"
+
+    # ── Primary: query SQLite database ───────────────────────────────────────
+    if DB_PATH.exists():
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.row_factory = sqlite3.Row
+
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM molecules").fetchone()
+            total = row["cnt"] if row else 0
+
+            top = conn.execute(
+                "SELECT smiles, clinical_score, molecular_weight, qed_score, sa_score "
+                "FROM molecules ORDER BY clinical_score DESC LIMIT 1"
+            ).fetchone()
+            if top:
+                best_molecule = top["smiles"]
+                best_score    = round(float(top["clinical_score"] or 0), 4)
+                best_mw       = _safe_float(top["molecular_weight"])
+
+            avgs = conn.execute(
+                "SELECT AVG(qed_score) AS aq, AVG(sa_score) AS as_ FROM molecules"
+            ).fetchone()
+            if avgs and avgs["aq"] is not None:
+                avg_qed = round(float(avgs["aq"]), 4)
+                avg_sa  = round(float(avgs["as_"]), 4)
+
+            conn.close()
+            if total > 0:
+                data_source = "database"
+        except Exception:
+            pass
+
+    # ── Fallback: scan pre-computed CSV files ─────────────────────────────────
+    if total == 0:
+        all_rows: list[dict] = []
+        for disease in ("diabetes", "infection"):
+            all_rows.extend(_load_csv(disease))
+        total = len(all_rows)
+        if all_rows:
+            data_source = "csv"
+            all_rows.sort(key=lambda r: float(r.get("clinical_score") or 0), reverse=True)
+            top_row = all_rows[0]
+            best_molecule = top_row.get("smiles")
+            best_score    = _safe_float(top_row.get("clinical_score"))
+            best_mw       = _safe_float(top_row.get("molecular_weight"))
+            valid_qeds = [float(r["qed_score"]) for r in all_rows if r.get("qed_score")]
+            valid_sas  = [float(r["sa_score"])  for r in all_rows if r.get("sa_score")]
+            avg_qed = round(sum(valid_qeds) / len(valid_qeds), 4) if valid_qeds else None
+            avg_sa  = round(sum(valid_sas)  / len(valid_sas),  4) if valid_sas  else None
+
+    # ── Honest empty state ────────────────────────────────────────────────────
+    if total == 0:
+        return {
+            "total_molecules":    0,
+            "best_score":         None,
+            "best_molecule":      None,
+            "best_molecular_weight": None,
+            "avg_qed_score":      None,
+            "avg_sa_score":       None,
+            "data_source":        "none",
+            "message": (
+                "No molecules generated yet. "
+                "Run: python src/run_pipeline.py to generate candidates."
+            ),
+        }
+
     return {
-        "total_molecules": TOTAL_MOLECULES,
-        "best_score": BEST_SCORE,
-        "best_molecule": BEST_MOLECULE,
-        "best_molecular_weight": BEST_MW,
-        "best_docking_affinity": BEST_DOCKING,
-        "best_ca7_ki": BEST_CA7_KI,
+        "total_molecules":       total,
+        "best_score":            best_score,
+        "best_molecule":         best_molecule,
+        "best_molecular_weight": best_mw,
+        "avg_qed_score":         avg_qed,
+        "avg_sa_score":          avg_sa,
+        "data_source":           data_source,
     }
 
 

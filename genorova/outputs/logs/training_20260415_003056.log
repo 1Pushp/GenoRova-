@@ -1,0 +1,10 @@
+2026-04-15 00:30:56,194 - INFO - Training started: dataset=moses max_samples=5000
+2026-04-15 00:31:14,076 - INFO - Total molecules: 5000
+2026-04-15 00:31:14,077 - INFO - Train/val split sizes: 4500 / 500
+2026-04-15 00:31:14,077 - INFO - Vocab size: 26
+2026-04-15 00:31:14,078 - INFO - Unique characters: #()-12345=BCFHNOS[]clnors
+2026-04-15 00:31:14,080 - INFO - SMILES length distribution: min=20 max=51 mean=35.90 p95=43 max_length=120
+2026-04-15 00:31:14,081 - INFO - Loader stats: {'dataset': 'moses', 'source_rows': 1584663, 'deduplicated_rows': 1584663, 'removed_by_length': 0, 'invalid_parse_count': 0, 'post_validation_rows': 10000, 'returned_rows': 5000, 'rdkit_warning_count': 0, 'min_len': 10, 'max_len': 100}
+2026-04-15 00:31:29,593 - INFO - Epoch 1 Validation | Loss: 0.1423
+2026-04-15 00:31:37,916 - INFO - Epoch 2 Validation | Loss: 0.0601
+2026-04-15 00:31:39,356 - INFO - Training complete. Best val loss: 0.0601

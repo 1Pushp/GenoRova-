@@ -1,13 +1,33 @@
-fastapi==0.115.0
-uvicorn==0.30.6
+# Genorova AI — Python dependencies
+# Versions verified against PyPI on 2026-04-14.
+# Pin exact versions for reproducible installs.
+#
+# torch/torchvision/torchaudio: 2.11.0 released 2026-03-23 — these ARE on PyPI.
+# rdkit: year-based versioning (2026.3.1) — the package name is plain `rdkit` since 2022.
+# numpy 2.x / pandas 3.x: major-version bumps; torch 2.11 and rdkit 2026.3 both support them.
+
+# ── Web API ───────────────────────────────────────────────────────────────────
+fastapi==0.135.3
+uvicorn==0.44.0
+pydantic==2.13.0
+
+# ── Machine Learning ──────────────────────────────────────────────────────────
 torch==2.11.0
 torchvision==0.26.0
 torchaudio==2.11.0
+
+# ── Chemistry ─────────────────────────────────────────────────────────────────
 rdkit==2026.3.1
-pandas==2.2.3
-numpy==1.26.4
-scikit-learn==1.5.2
-pillow==10.4.0
+
+# ── Data science ──────────────────────────────────────────────────────────────
+pandas==3.0.2
+numpy==2.4.4
+scikit-learn==1.8.0
+
+# ── Imaging ───────────────────────────────────────────────────────────────────
+pillow==12.2.0
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
 requests==2.33.1
 python-dateutil==2.9.0.post0
-pydantic==2.7.0
+tqdm==4.66.5

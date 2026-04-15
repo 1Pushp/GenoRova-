@@ -1,3 +1,6 @@
+import csv
+import sqlite3
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -9,6 +12,11 @@ import chat_memory
 import main_legacy_api
 from chat_logic import handle_chat_message
 
+# ── Paths to genorova data (written by genorova/src/api.py) ──────────────────
+_ROOT_DIR       = Path(__file__).resolve().parents[2]
+_GENOROVA_DB    = _ROOT_DIR / "genorova" / "outputs" / "genorova_memory.db"
+_GENERATED_DIR  = _ROOT_DIR / "genorova" / "outputs" / "generated"
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -18,14 +26,6 @@ class ChatRequest(BaseModel):
 class NewConversationRequest(BaseModel):
     title: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
-
-
-BEST_MOLECULE = "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2"
-BEST_SCORE = 0.9649
-BEST_MW = 286
-BEST_DOCKING = -5.041
-BEST_CA7_KI = "6.4 nM"
-TOTAL_MOLECULES = 100
 
 
 app = FastAPI(
@@ -103,16 +103,109 @@ def api_best():
     return main_legacy_api.best_molecules(n=5)
 
 
+def _live_stats() -> dict[str, Any]:
+    """
+    Compute platform statistics from the genorova molecule database and CSV
+    outputs.  Returns an honest empty-state dict when no molecules exist yet
+    rather than fabricated placeholder values.
+    """
+    total = 0
+    best_score: float | None = None
+    best_molecule: str | None = None
+    best_mw: float | None = None
+    avg_qed: float | None = None
+    avg_sa: float | None = None
+    data_source = "none"
+
+    # ── Primary: SQLite database written by genorova/src/api.py ──────────────
+    if _GENOROVA_DB.exists():
+        try:
+            conn = sqlite3.connect(str(_GENOROVA_DB))
+            conn.row_factory = sqlite3.Row
+
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM molecules").fetchone()
+            total = row["cnt"] if row else 0
+
+            top = conn.execute(
+                "SELECT smiles, clinical_score, molecular_weight "
+                "FROM molecules ORDER BY clinical_score DESC LIMIT 1"
+            ).fetchone()
+            if top:
+                best_molecule = top["smiles"]
+                best_score    = round(float(top["clinical_score"] or 0), 4)
+                try:
+                    best_mw = round(float(top["molecular_weight"] or 0), 2)
+                except (TypeError, ValueError):
+                    best_mw = None
+
+            avgs = conn.execute(
+                "SELECT AVG(qed_score) AS aq, AVG(sa_score) AS as_ FROM molecules"
+            ).fetchone()
+            if avgs and avgs["aq"] is not None:
+                avg_qed = round(float(avgs["aq"]), 4)
+                avg_sa  = round(float(avgs["as_"]), 4)
+
+            conn.close()
+            if total > 0:
+                data_source = "database"
+        except Exception:
+            pass
+
+    # ── Fallback: scan pre-computed CSV files ─────────────────────────────────
+    if total == 0 and _GENERATED_DIR.exists():
+        all_rows: list[dict] = []
+        for csv_path in _GENERATED_DIR.glob("*.csv"):
+            try:
+                with open(csv_path, encoding="utf-8") as f:
+                    all_rows.extend(csv.DictReader(f))
+            except Exception:
+                pass
+        total = len(all_rows)
+        if all_rows:
+            data_source = "csv"
+            all_rows.sort(
+                key=lambda r: float(r.get("clinical_score") or 0), reverse=True
+            )
+            top_row = all_rows[0]
+            best_molecule = top_row.get("smiles")
+            try:
+                best_score = round(float(top_row.get("clinical_score") or 0), 4)
+            except (TypeError, ValueError):
+                best_score = None
+            try:
+                best_mw = round(float(top_row.get("molecular_weight") or 0), 2)
+            except (TypeError, ValueError):
+                best_mw = None
+
+    if total == 0:
+        return {
+            "total_molecules":       0,
+            "best_score":            None,
+            "best_molecule":         None,
+            "best_molecular_weight": None,
+            "avg_qed_score":         None,
+            "avg_sa_score":          None,
+            "data_source":           "none",
+            "message": (
+                "No molecules generated yet. "
+                "Run the Genorova pipeline first."
+            ),
+        }
+
+    return {
+        "total_molecules":       total,
+        "best_score":            best_score,
+        "best_molecule":         best_molecule,
+        "best_molecular_weight": best_mw,
+        "avg_qed_score":         avg_qed,
+        "avg_sa_score":          avg_sa,
+        "data_source":           data_source,
+    }
+
+
 @app.get("/api/stats")
 def api_stats():
-    return {
-        "total_molecules": TOTAL_MOLECULES,
-        "best_score": BEST_SCORE,
-        "best_molecule": BEST_MOLECULE,
-        "best_molecular_weight": BEST_MW,
-        "best_docking_affinity": BEST_DOCKING,
-        "best_ca7_ki": BEST_CA7_KI,
-    }
+    return _live_stats()
 
 
 @app.get("/report")
