@@ -103,3 +103,12 @@ When `/generate` cannot provide a trustworthy fresh result, the active API now
 returns explicit fallback messaging and may show previously scored valid
 molecules or known reference molecules instead of pretending generation
 succeeded.
+
+## Project Packaging Docs
+
+For a concise presentation-ready view of the current prototype, see:
+
+- `VERSION_STATUS.md` for the honest current-state summary
+- `NEXT_ROADMAP.md` for immediate, short-term, and medium-term priorities
+- `DEMO_SCRIPT.md` for a safe founder/demo flow
+- `PROJECT_SUMMARY.md` for LinkedIn, resume, incubator, and intro-message use

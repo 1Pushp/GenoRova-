@@ -55,3 +55,16 @@ Issues:
 
 Next:
 - Add BOS/EOS-aware sequence handling and generation-time validity checks before treating fresh generation as a trustworthy product capability.
+
+## Day 7
+Done:
+- Added `VERSION_STATUS.md` to summarize what Genorova currently is, what works, what is partial, what is unsolved, and the safest demo workflows.
+- Added `NEXT_ROADMAP.md`, `DEMO_SCRIPT.md`, and `PROJECT_SUMMARY.md` to package the project for demos, LinkedIn, incubator forms, and early founder conversations.
+- Updated `README.md` so readers can quickly find the project status, roadmap, demo guide, and summary documents.
+
+Issues:
+- The main scientific blocker is unchanged: fresh de novo generation quality is still weak, with Day 5 evaluation showing essentially 0% RDKit-valid molecules across the compared seeded checkpoint runs.
+- The current product is strongest as a computational analysis and trust-aware demo prototype, not yet as a reliable molecule generator.
+
+Next:
+- Improve sequence generation quality, then refresh the version-status and demo materials once validity improves materially.
