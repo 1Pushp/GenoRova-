@@ -65,6 +65,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NUM_MOLECULES_TO_GENERATE = 100
 TEMPERATURE = 1.0
 BATCH_SIZE = 50
+TOP_K = 5
+REPETITION_PENALTY = 0.75
+STRUCTURAL_GUARD_STRENGTH = 1.0
 
 # Validation thresholds
 VALIDITY_THRESHOLD = 0.85
@@ -371,9 +374,10 @@ class MoleculeGenerator:
                 self.char2idx,
                 temperature=TEMPERATURE,
                 strategy="sample",
-                top_k=5,
-                repetition_penalty=0.75,
+                top_k=TOP_K,
+                repetition_penalty=REPETITION_PENALTY,
                 min_tokens_before_stop=2,
+                structural_guard_strength=STRUCTURAL_GUARD_STRENGTH,
             )
             
             # Convert indices to SMILES

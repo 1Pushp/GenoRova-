@@ -1,0 +1,55 @@
+{
+  "invalid_total": 909,
+  "invalid_reason_counts": {
+    "rdkit_parse_failure": 549,
+    "long_repetitive_fragment": 154,
+    "ring_closure_mismatch": 108,
+    "unbalanced_parentheses": 56,
+    "unbalanced_brackets": 42
+  },
+  "invalid_reason_percentages": {
+    "rdkit_parse_failure": 60.4,
+    "long_repetitive_fragment": 16.94,
+    "ring_closure_mismatch": 11.88,
+    "unbalanced_parentheses": 6.16,
+    "unbalanced_brackets": 4.62
+  },
+  "average_invalid_length": 81.3179,
+  "median_invalid_length": 89.0,
+  "common_invalid_endings": {
+    "ccc1": 14,
+    "CCC1": 11,
+    "C)C1": 9,
+    ")cc1": 8,
+    "2)O1": 6,
+    "O)c1": 6,
+    "OCC1": 5,
+    "1C#N": 5,
+    "C1C1": 5,
+    "2)C1": 4
+  },
+  "common_invalid_last_tokens": {
+    "1": 290,
+    "2": 92,
+    "C": 78,
+    ")": 68,
+    "O": 50,
+    "c": 43,
+    "3": 39,
+    "l": 33,
+    "4": 29,
+    "]": 25
+  },
+  "mean_invalid_length_by_reason": {
+    "long_repetitive_fragment": 43.9545,
+    "rdkit_parse_failure": 77.6594,
+    "ring_closure_mismatch": 119.0,
+    "unbalanced_brackets": 119.0,
+    "unbalanced_parentheses": 119.0
+  },
+  "structural_residual_counts": {
+    "nonzero_parenthesis_balance": 56,
+    "nonzero_bracket_balance": 49,
+    "nonzero_unmatched_ring_count": 156
+  }
+}

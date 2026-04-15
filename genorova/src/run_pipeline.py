@@ -82,6 +82,9 @@ LR          = 0.001
 LR_DECAY    = 0.95            # reduce LR by 5% every 10 epochs
 GRAD_CLIP   = 1.0
 SANITY_CHECK_EVERY = 5
+DECODE_TOP_K = 5
+DECODE_REPETITION_PENALTY = 0.75
+DECODE_STRUCTURAL_GUARD_STRENGTH = 1.0
 
 # ---- CYCLIC KL ANNEALING ----
 # KL weight cycles from 0 → KL_MAX_WEIGHT → 0 every KL_CYCLE_LENGTH epochs.
@@ -293,9 +296,10 @@ def quick_generation_sanity_check(
             char2idx,
             temperature=max(temperature, 0.2),
             strategy="sample",
-            top_k=5,
-            repetition_penalty=0.75,
+            top_k=DECODE_TOP_K,
+            repetition_penalty=DECODE_REPETITION_PENALTY,
             min_tokens_before_stop=2,
+            structural_guard_strength=DECODE_STRUCTURAL_GUARD_STRENGTH,
         )
         decoded_rows = [decode_token_ids(seq, idx2char, char2idx=char2idx) for seq in indices]
 
@@ -639,9 +643,10 @@ def guided_generate(model, encoded_data, char2idx, idx2char, vocab_size,
                 char2idx,
                 temperature=max(temperature, 0.2),
                 strategy="sample",
-                top_k=5,
-                repetition_penalty=0.75,
+                top_k=DECODE_TOP_K,
+                repetition_penalty=DECODE_REPETITION_PENALTY,
                 min_tokens_before_stop=2,
+                structural_guard_strength=DECODE_STRUCTURAL_GUARD_STRENGTH,
             )
 
             for seq in indices:

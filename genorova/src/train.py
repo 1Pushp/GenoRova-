@@ -1283,6 +1283,7 @@ def quick_generation_sanity_check(
             top_k=5,
             repetition_penalty=0.75,
             min_tokens_before_stop=2,
+            structural_guard_strength=1.0,
         )
         decoded_rows = [decode_token_ids(seq, idx2char, char2idx=char2idx) for seq in indices]
 

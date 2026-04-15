@@ -217,6 +217,102 @@ def preprocess_batch(
     return np.array(batch, dtype=np.float32)
 
 
+_BOND_TOKENS = {"=", "#", "-", "/", "\\", ":"}
+_OPEN_TOKENS = {"(", "["}
+_TERMINAL_INVALID_TOKENS = _OPEN_TOKENS | _BOND_TOKENS | {"."}
+_RING_DIGIT_TOKENS = {str(digit) for digit in range(1, 10)}
+_SMILES_ATTACH_TOKENS = {")", "]"} | _RING_DIGIT_TOKENS
+_VERY_NEGATIVE = -1e9
+
+
+def _is_atom_like_token(token: str | None) -> bool:
+    return bool(token) and len(token) == 1 and (token.isalpha() or token == "*")
+
+
+def _can_attach_to_atom(token: str | None) -> bool:
+    return _is_atom_like_token(token) or token in _SMILES_ATTACH_TOKENS
+
+
+def _init_structural_state() -> Dict[str, Any]:
+    return {
+        "open_paren": 0,
+        "open_bracket": 0,
+        "open_ring_digits": set(),
+        "seen_atom": False,
+        "last_token": None,
+        "recent_tokens": [],
+        "max_paren_depth": 0,
+        "max_bracket_depth": 0,
+    }
+
+
+def _update_structural_state(state: Dict[str, Any], token_text: str | None) -> None:
+    if not token_text or token_text in SPECIAL_TOKENS:
+        return
+
+    state["recent_tokens"].append(token_text)
+    if len(state["recent_tokens"]) > 6:
+        state["recent_tokens"] = state["recent_tokens"][-6:]
+
+    if token_text == "(":
+        state["open_paren"] += 1
+        state["max_paren_depth"] = max(state["max_paren_depth"], state["open_paren"])
+    elif token_text == ")":
+        state["open_paren"] = max(0, state["open_paren"] - 1)
+    elif token_text == "[":
+        state["open_bracket"] += 1
+        state["max_bracket_depth"] = max(state["max_bracket_depth"], state["open_bracket"])
+    elif token_text == "]":
+        state["open_bracket"] = max(0, state["open_bracket"] - 1)
+    elif token_text in _RING_DIGIT_TOKENS:
+        if token_text in state["open_ring_digits"]:
+            state["open_ring_digits"].remove(token_text)
+        else:
+            state["open_ring_digits"].add(token_text)
+
+    if _is_atom_like_token(token_text):
+        state["seen_atom"] = True
+
+    state["last_token"] = token_text
+
+
+def _structural_snapshot(
+    token_list: List[int],
+    idx2char: Dict[int, str],
+    *,
+    pad_idx: int | None,
+    bos_idx: int | None,
+    eos_idx: int | None,
+) -> Dict[str, Any]:
+    state = _init_structural_state()
+    effective_tokens: List[str] = []
+
+    for token_id in token_list:
+        if bos_idx is not None and token_id == bos_idx:
+            continue
+        if eos_idx is not None and token_id == eos_idx:
+            break
+        if pad_idx is not None and token_id == pad_idx:
+            break
+        token_text = idx2char.get(token_id, "")
+        if token_text in SPECIAL_TOKENS:
+            continue
+        effective_tokens.append(token_text)
+        _update_structural_state(state, token_text)
+
+    ending_tokens = effective_tokens[-4:]
+    return {
+        "parenthesis_balance": int(state["open_paren"]),
+        "bracket_balance": int(state["open_bracket"]),
+        "unmatched_ring_digits": sorted(state["open_ring_digits"]),
+        "unmatched_ring_count": int(len(state["open_ring_digits"])),
+        "last_non_special_token": state["last_token"],
+        "ending_motif": "".join(ending_tokens),
+        "max_parenthesis_depth": int(state["max_paren_depth"]),
+        "max_bracket_depth": int(state["max_bracket_depth"]),
+    }
+
+
 def select_token_ids_from_logits(
     logits: torch.Tensor,
     char2idx: Dict[str, int],
@@ -226,6 +322,7 @@ def select_token_ids_from_logits(
     strategy: str = "greedy",
     repetition_penalty: float = 0.0,
     min_tokens_before_stop: int = 1,
+    structural_guard_strength: float = 1.0,
 ) -> torch.Tensor:
     """
     Turn decoder logits into token ids with basic sequence-aware constraints.
@@ -243,30 +340,43 @@ def select_token_ids_from_logits(
     bos_idx = token_ids["bos"]
     eos_idx = token_ids["eos"]
     pad_idx = token_ids["pad"]
+    unk_idx = token_ids["unk"]
+    idx2char = {idx: token for token, idx in char2idx.items()}
 
     batch_size, seq_len, _ = logits.shape
     selected = torch.empty(batch_size, seq_len, dtype=torch.long, device=logits.device)
+    structural_states = [_init_structural_state() for _ in range(batch_size)]
 
     if strategy not in {"greedy", "sample"}:
         raise ValueError(f"Unsupported decode strategy: {strategy}")
 
     effective_temperature = max(float(temperature), 1e-6)
+    effective_guard_strength = max(float(structural_guard_strength), 0.0)
 
     for pos in range(seq_len):
         step_logits = logits[:, pos, :].clone()
 
         if bos_idx is not None and pos > 0:
-            step_logits[:, bos_idx] = -1e9
+            step_logits[:, bos_idx] = _VERY_NEGATIVE
 
         if pos == 0 and bos_idx is not None:
             selected[:, pos] = bos_idx
+            bos_token_text = idx2char.get(bos_idx)
+            for state in structural_states:
+                _update_structural_state(state, bos_token_text)
             continue
 
         if pos <= min_tokens_before_stop:
             if eos_idx is not None:
-                step_logits[:, eos_idx] = -1e9
+                step_logits[:, eos_idx] = _VERY_NEGATIVE
             if pad_idx is not None:
-                step_logits[:, pad_idx] = -1e9
+                step_logits[:, pad_idx] = _VERY_NEGATIVE
+
+        if effective_guard_strength > 0.0:
+            if unk_idx is not None:
+                step_logits[:, unk_idx] = _VERY_NEGATIVE
+            if eos_idx is not None and pad_idx is not None:
+                step_logits[:, pad_idx] = _VERY_NEGATIVE
 
         if repetition_penalty > 0.0 and pos > 0:
             prev_ids = selected[:, pos - 1]
@@ -274,9 +384,81 @@ def select_token_ids_from_logits(
                 prev_id = int(prev_ids[row_idx].item())
                 step_logits[row_idx, prev_id] -= repetition_penalty
 
+        if effective_guard_strength > 0.0:
+            remaining_positions = seq_len - pos - 1
+            open_paren_idx = char2idx.get("(")
+            close_paren_idx = char2idx.get(")")
+            open_bracket_idx = char2idx.get("[")
+            close_bracket_idx = char2idx.get("]")
+            ring_digit_ids = {
+                digit: char2idx[digit]
+                for digit in _RING_DIGIT_TOKENS
+                if digit in char2idx
+            }
+
+            for row_idx, state in enumerate(structural_states):
+                last_token = state["last_token"]
+                open_ring_digits = state["open_ring_digits"]
+                structurally_sane = (
+                    state["seen_atom"]
+                    and state["open_paren"] == 0
+                    and state["open_bracket"] == 0
+                    and not open_ring_digits
+                    and last_token not in _TERMINAL_INVALID_TOKENS
+                )
+
+                if close_paren_idx is not None:
+                    if state["open_paren"] == 0 or last_token in {"(", "["} | _BOND_TOKENS or last_token is None:
+                        step_logits[row_idx, close_paren_idx] = _VERY_NEGATIVE
+                    elif remaining_positions <= max(2, state["open_paren"] + len(open_ring_digits)):
+                        step_logits[row_idx, close_paren_idx] += 0.75 * effective_guard_strength
+
+                if close_bracket_idx is not None:
+                    if state["open_bracket"] == 0 or last_token == "[" or last_token in _BOND_TOKENS or last_token is None:
+                        step_logits[row_idx, close_bracket_idx] = _VERY_NEGATIVE
+                    elif remaining_positions <= max(2, state["open_bracket"] + len(open_ring_digits)):
+                        step_logits[row_idx, close_bracket_idx] += 0.75 * effective_guard_strength
+
+                if open_paren_idx is not None:
+                    if not state["seen_atom"] or last_token in {None, "(", "["} | _BOND_TOKENS:
+                        step_logits[row_idx, open_paren_idx] = _VERY_NEGATIVE
+
+                if open_bracket_idx is not None:
+                    if state["open_bracket"] > 0 or last_token == "[":
+                        step_logits[row_idx, open_bracket_idx] = _VERY_NEGATIVE
+
+                if eos_idx is not None and pos > min_tokens_before_stop:
+                    if not structurally_sane:
+                        step_logits[row_idx, eos_idx] = _VERY_NEGATIVE
+                    elif pos >= min_tokens_before_stop + 2:
+                        step_logits[row_idx, eos_idx] += 0.5 * effective_guard_strength
+
+                if ring_digit_ids:
+                    if not _can_attach_to_atom(last_token):
+                        for ring_idx in ring_digit_ids.values():
+                            step_logits[row_idx, ring_idx] = _VERY_NEGATIVE
+                    else:
+                        if last_token in _RING_DIGIT_TOKENS:
+                            for ring_idx in ring_digit_ids.values():
+                                step_logits[row_idx, ring_idx] -= 0.6 * effective_guard_strength
+
+                        unmatched_ring_count = len(open_ring_digits)
+                        for digit, ring_idx in ring_digit_ids.items():
+                            if digit in open_ring_digits:
+                                if remaining_positions <= max(2, unmatched_ring_count + state["open_paren"]):
+                                    step_logits[row_idx, ring_idx] += 0.8 * effective_guard_strength
+                            else:
+                                if unmatched_ring_count >= 2:
+                                    step_logits[row_idx, ring_idx] -= 0.7 * effective_guard_strength
+                                if remaining_positions <= 4:
+                                    step_logits[row_idx, ring_idx] -= 1.0 * effective_guard_strength
+
+                if last_token in _BOND_TOKENS and eos_idx is not None:
+                    step_logits[row_idx, eos_idx] = _VERY_NEGATIVE
+
         if top_k and top_k > 0 and top_k < step_logits.shape[-1]:
             top_values, top_indices = torch.topk(step_logits, k=top_k, dim=-1)
-            masked = torch.full_like(step_logits, -1e9)
+            masked = torch.full_like(step_logits, _VERY_NEGATIVE)
             masked.scatter_(1, top_indices, top_values)
             step_logits = masked
 
@@ -287,6 +469,9 @@ def select_token_ids_from_logits(
             next_ids = torch.argmax(step_logits, dim=-1)
 
         selected[:, pos] = next_ids
+        for row_idx in range(batch_size):
+            token_text = idx2char.get(int(next_ids[row_idx].item()))
+            _update_structural_state(structural_states[row_idx], token_text)
 
     return selected
 
@@ -346,6 +531,13 @@ def decode_token_ids(
         chars.append(token_text)
 
     raw_smiles = "".join(chars).strip()
+    structural_snapshot = _structural_snapshot(
+        token_list,
+        idx2char,
+        pad_idx=pad_idx,
+        bos_idx=bos_idx,
+        eos_idx=eos_idx,
+    )
     return {
         "token_ids": token_list,
         "raw_tokens": raw_tokens,
@@ -357,6 +549,7 @@ def decode_token_ids(
         "first_pad_position": first_pad_position,
         "termination_token": termination_token,
         "termination_reason": termination_reason,
+        **structural_snapshot,
     }
 
 
