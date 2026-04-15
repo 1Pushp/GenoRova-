@@ -38,7 +38,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from pathlib import Path
-from typing import Tuple, Dict, List
+from typing import Any, Tuple, Dict, List
 
 
 # ============================================================================
@@ -48,6 +48,10 @@ from typing import Tuple, Dict, List
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MAX_SMILES_LENGTH = 120  # Maximum length of SMILES string (pad/truncate to this)
 PAD_TOKEN = "<pad>"      # Special token for padding
+BOS_TOKEN = "<bos>"      # Explicit sequence start token for training/generation
+EOS_TOKEN = "<eos>"      # Explicit sequence end token for training/generation
+UNK_TOKEN = "<unk>"      # Fallback token for unexpected characters
+SPECIAL_TOKENS = [PAD_TOKEN, BOS_TOKEN, EOS_TOKEN, UNK_TOKEN]
 VOCAB_OUTPUT_PATH = ROOT_DIR / "outputs" / "vocab.json"
 
 
@@ -84,9 +88,9 @@ def build_vocab(smiles_list: List[str]) -> Tuple[Dict[str, int], Dict[int, str]]
     # Sort for consistency
     unique_chars = sorted(list(unique_chars))
     
-    # Create mappings
-    char2idx = {PAD_TOKEN: 0}  # Start with pad token at index 0
-    for idx, char in enumerate(unique_chars, start=1):
+    # Create mappings with stable special-token indices.
+    char2idx = {token: idx for idx, token in enumerate(SPECIAL_TOKENS)}
+    for idx, char in enumerate(unique_chars, start=len(char2idx)):
         char2idx[char] = idx
     
     # Reverse mapping
@@ -100,9 +104,67 @@ def build_vocab(smiles_list: List[str]) -> Tuple[Dict[str, int], Dict[int, str]]
     return char2idx, idx2char
 
 
+def get_special_token_ids(char2idx: Dict[str, int]) -> Dict[str, int | None]:
+    """Return the ids of known sequence-control tokens for a vocabulary."""
+    return {
+        "pad": char2idx.get(PAD_TOKEN),
+        "bos": char2idx.get(BOS_TOKEN),
+        "eos": char2idx.get(EOS_TOKEN),
+        "unk": char2idx.get(UNK_TOKEN),
+    }
+
+
+def uses_explicit_sequence_tokens(char2idx: Dict[str, int]) -> bool:
+    """Whether a vocabulary supports explicit BOS/EOS handling."""
+    return BOS_TOKEN in char2idx and EOS_TOKEN in char2idx
+
+
 # ============================================================================
 # ENCODING FUNCTIONS
 # ============================================================================
+
+def encode_smiles_to_indices(
+    smiles: str,
+    char2idx: Dict[str, int],
+    max_length: int = MAX_SMILES_LENGTH,
+) -> np.ndarray:
+    """
+    Convert a SMILES string into token ids with explicit BOS/EOS when available.
+
+    New vocabularies reserve:
+    - <pad> index 0
+    - <bos> start token
+    - <eos> end token
+    - <unk> unexpected character token
+
+    Older vocabularies remain readable because BOS/EOS are only inserted when
+    those tokens exist in the loaded vocabulary.
+    """
+    token_ids = get_special_token_ids(char2idx)
+    bos_idx = token_ids["bos"]
+    eos_idx = token_ids["eos"]
+    pad_idx = token_ids["pad"] if token_ids["pad"] is not None else 0
+    unk_idx = token_ids["unk"] if token_ids["unk"] is not None else pad_idx
+
+    indices: list[int] = []
+    if bos_idx is not None:
+        indices.append(bos_idx)
+
+    for char in str(smiles):
+        indices.append(char2idx.get(char, unk_idx))
+
+    if eos_idx is not None:
+        indices.append(eos_idx)
+
+    # Truncate but preserve an EOS marker for new training runs when possible.
+    if len(indices) > max_length:
+        indices = indices[:max_length]
+        if eos_idx is not None:
+            indices[-1] = eos_idx
+
+    indices.extend([pad_idx] * (max_length - len(indices)))
+    return np.array(indices, dtype=np.int64)
+
 
 def encode_smiles(smiles: str, char2idx: Dict[str, int], max_length: int = MAX_SMILES_LENGTH) -> np.ndarray:
     """
@@ -122,28 +184,13 @@ def encode_smiles(smiles: str, char2idx: Dict[str, int], max_length: int = MAX_S
         np.ndarray: Shape [max_length, vocab_size] containing one-hot encoding
     """
     vocab_size = len(char2idx)
-    
-    # Convert SMILES string to indices
-    indices = []
-    for char in smiles:
-        if char in char2idx:
-            indices.append(char2idx[char])
-        else:
-            # Skip unknown characters (should not happen with proper vocab)
-            indices.append(char2idx[PAD_TOKEN])
-    
-    # Truncate if too long
-    if len(indices) > max_length:
-        indices = indices[:max_length]
-    
-    # Pad with 0 (pad token) if too short
-    indices = indices + [0] * (max_length - len(indices))
-    
+    indices = encode_smiles_to_indices(smiles, char2idx, max_length=max_length)
+
     # Create one-hot encoding: [max_length, vocab_size]
     one_hot = np.zeros((max_length, vocab_size), dtype=np.float32)
     for pos, idx in enumerate(indices):
-        one_hot[pos, idx] = 1.0
-    
+        one_hot[pos, int(idx)] = 1.0
+
     return one_hot
 
 
@@ -168,6 +215,149 @@ def preprocess_batch(
         batch.append(one_hot)
     
     return np.array(batch, dtype=np.float32)
+
+
+def select_token_ids_from_logits(
+    logits: torch.Tensor,
+    char2idx: Dict[str, int],
+    *,
+    temperature: float = 1.0,
+    top_k: int = 0,
+    strategy: str = "greedy",
+    repetition_penalty: float = 0.0,
+    min_tokens_before_stop: int = 1,
+) -> torch.Tensor:
+    """
+    Turn decoder logits into token ids with basic sequence-aware constraints.
+
+    This is still non-autoregressive, but it avoids a few common failure modes:
+    - forcing BOS at position 0 when available
+    - blocking BOS after the first position
+    - delaying EOS/PAD for the first few decoded tokens
+    - optional repetition penalty against long identical runs
+    """
+    if logits.ndim != 3:
+        raise ValueError(f"Expected [batch, length, vocab] logits, got shape {tuple(logits.shape)}")
+
+    token_ids = get_special_token_ids(char2idx)
+    bos_idx = token_ids["bos"]
+    eos_idx = token_ids["eos"]
+    pad_idx = token_ids["pad"]
+
+    batch_size, seq_len, _ = logits.shape
+    selected = torch.empty(batch_size, seq_len, dtype=torch.long, device=logits.device)
+
+    if strategy not in {"greedy", "sample"}:
+        raise ValueError(f"Unsupported decode strategy: {strategy}")
+
+    effective_temperature = max(float(temperature), 1e-6)
+
+    for pos in range(seq_len):
+        step_logits = logits[:, pos, :].clone()
+
+        if bos_idx is not None and pos > 0:
+            step_logits[:, bos_idx] = -1e9
+
+        if pos == 0 and bos_idx is not None:
+            selected[:, pos] = bos_idx
+            continue
+
+        if pos <= min_tokens_before_stop:
+            if eos_idx is not None:
+                step_logits[:, eos_idx] = -1e9
+            if pad_idx is not None:
+                step_logits[:, pad_idx] = -1e9
+
+        if repetition_penalty > 0.0 and pos > 0:
+            prev_ids = selected[:, pos - 1]
+            for row_idx in range(batch_size):
+                prev_id = int(prev_ids[row_idx].item())
+                step_logits[row_idx, prev_id] -= repetition_penalty
+
+        if top_k and top_k > 0 and top_k < step_logits.shape[-1]:
+            top_values, top_indices = torch.topk(step_logits, k=top_k, dim=-1)
+            masked = torch.full_like(step_logits, -1e9)
+            masked.scatter_(1, top_indices, top_values)
+            step_logits = masked
+
+        if strategy == "sample":
+            probs = torch.softmax(step_logits / effective_temperature, dim=-1)
+            next_ids = torch.multinomial(probs, num_samples=1).squeeze(1)
+        else:
+            next_ids = torch.argmax(step_logits, dim=-1)
+
+        selected[:, pos] = next_ids
+
+    return selected
+
+
+def decode_token_ids(
+    token_ids: List[int] | np.ndarray | torch.Tensor,
+    idx2char: Dict[int, str],
+    *,
+    char2idx: Dict[str, int] | None = None,
+) -> Dict[str, Any]:
+    """
+    Decode token ids into a SMILES-like string and expose useful debug metadata.
+    """
+    if isinstance(token_ids, torch.Tensor):
+        token_list = [int(token.item()) for token in token_ids]
+    elif isinstance(token_ids, np.ndarray):
+        token_list = [int(token) for token in token_ids.tolist()]
+    else:
+        token_list = [int(token) for token in token_ids]
+
+    token_ids_map = get_special_token_ids(char2idx or {})
+    pad_idx = token_ids_map["pad"]
+    bos_idx = token_ids_map["bos"]
+    eos_idx = token_ids_map["eos"]
+    unk_idx = token_ids_map["unk"]
+
+    raw_tokens = [idx2char.get(token_id, f"<{token_id}>") for token_id in token_list]
+    chars: list[str] = []
+    effective_ids: list[int] = []
+    first_bos_position = None
+    first_eos_position = None
+    first_pad_position = None
+    termination_token = None
+    termination_reason = "max_length"
+
+    for position, token_id in enumerate(token_list):
+        if bos_idx is not None and token_id == bos_idx:
+            if first_bos_position is None:
+                first_bos_position = position
+            continue
+        if eos_idx is not None and token_id == eos_idx:
+            first_eos_position = position
+            termination_token = EOS_TOKEN
+            termination_reason = "eos"
+            break
+        if pad_idx is not None and token_id == pad_idx:
+            first_pad_position = position
+            termination_token = PAD_TOKEN
+            termination_reason = "pad"
+            break
+        if unk_idx is not None and token_id == unk_idx:
+            termination_reason = "contains_unk" if termination_reason == "max_length" else termination_reason
+        effective_ids.append(token_id)
+        token_text = idx2char.get(token_id, "")
+        if token_text in SPECIAL_TOKENS:
+            continue
+        chars.append(token_text)
+
+    raw_smiles = "".join(chars).strip()
+    return {
+        "token_ids": token_list,
+        "raw_tokens": raw_tokens,
+        "effective_token_ids": effective_ids,
+        "raw_smiles": raw_smiles,
+        "raw_length": len(raw_smiles),
+        "first_bos_position": first_bos_position,
+        "first_eos_position": first_eos_position,
+        "first_pad_position": first_pad_position,
+        "termination_token": termination_token,
+        "termination_reason": termination_reason,
+    }
 
 
 # ============================================================================
@@ -251,6 +441,10 @@ def load_vocab(vocab_path: str = VOCAB_OUTPUT_PATH) -> Tuple[Dict[str, int], Dic
     
     print(f"   [OK] Vocabulary loaded successfully!")
     print(f"   [OK] Vocabulary size: {len(char2idx)}")
+    if uses_explicit_sequence_tokens(char2idx):
+        print(f"   [OK] Explicit sequence tokens detected: {BOS_TOKEN}, {EOS_TOKEN}")
+    else:
+        print(f"   [!] Legacy vocabulary detected: no explicit {BOS_TOKEN}/{EOS_TOKEN} tokens")
     
     return char2idx, idx2char
 

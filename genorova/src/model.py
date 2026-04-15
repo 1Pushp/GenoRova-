@@ -53,6 +53,8 @@ import torch.nn.functional as F
 from pathlib import Path
 from typing import Tuple
 
+PAD_INDEX = 0
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -413,12 +415,22 @@ class VAE(nn.Module):
             - recon_loss: Binary cross entropy
             - kl_loss: KL divergence (after free bits)
         """
-        # Flatten for loss calculation
-        recon_x_flat = recon_x.view(-1, recon_x.size(-1))  # [batch*max_length, vocab_size]
-        x_flat       = x.view(-1, x.size(-1))              # [batch*max_length, vocab_size]
+        # Convert one-hot targets back to class ids so the decoder learns
+        # categorical token reconstruction rather than independent per-token BCE.
+        target_ids = torch.argmax(x, dim=-1)  # [batch, max_length]
+        recon_logits = recon_x.view(-1, recon_x.size(-1))
+        target_flat = target_ids.view(-1)
 
-        # Reconstruction loss: Binary Cross Entropy with Logits
-        recon_loss = F.binary_cross_entropy_with_logits(recon_x_flat, x_flat, reduction='mean')
+        # Ignore padding so the model focuses on BOS/SMILES/EOS tokens.
+        non_pad_mask = target_flat != PAD_INDEX
+        if non_pad_mask.any():
+            recon_loss = F.cross_entropy(
+                recon_logits[non_pad_mask],
+                target_flat[non_pad_mask],
+                reduction='mean',
+            )
+        else:
+            recon_loss = F.cross_entropy(recon_logits, target_flat, reduction='mean')
 
         # KL divergence per sample per dimension: [batch, latent_dim]
         kl_per_dim = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())

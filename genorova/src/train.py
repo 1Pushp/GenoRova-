@@ -624,6 +624,7 @@ import os
 import sys
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
 import numpy as np
@@ -716,18 +717,18 @@ def vae_loss(recon_x, x, mean, logvar, kl_weight=KL_WEIGHT):
         tuple: (total_loss, recon_loss, kl_loss)
     """
     # Reconstruction loss: Binary Cross Entropy
-    # Flatten for BCE calculation
-    recon_x_flat = recon_x.view(-1, recon_x.size(-1))
-    x_flat = x.view(-1, x.size(-1))
-    recon_loss = nn.BCEWithLogitsLoss()(recon_x_flat, x_flat)
-    
-    # KL divergence: KL(N(mean, var) || N(0, 1))
-    # KL = 0.5 * sum(1 + logvar - mean^2 - exp(logvar))
-    kl_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mean.pow(2) - logvar.exp(), dim=1))
-    
-    # Total loss
+    target_ids = torch.argmax(x, dim=-1)
+    recon_logits = recon_x.view(-1, recon_x.size(-1))
+    target_flat = target_ids.view(-1)
+    non_pad_mask = target_flat != 0
+    if non_pad_mask.any():
+        recon_loss = F.cross_entropy(recon_logits[non_pad_mask], target_flat[non_pad_mask], reduction="mean")
+    else:
+        recon_loss = F.cross_entropy(recon_logits, target_flat, reduction="mean")
+
+    kl_per_dim = -0.5 * (1 + logvar - mean.pow(2) - logvar.exp())
+    kl_loss = kl_per_dim.mean()
     total_loss = RECON_WEIGHT * recon_loss + kl_weight * kl_loss
-    
     return total_loss, recon_loss, kl_loss
 
 
@@ -1150,10 +1151,14 @@ from typing import Dict
 from data_loader import load_smiles_dataset
 from preprocessor import (
     MAX_SMILES_LENGTH as DEFAULT_MAX_SMILES_LENGTH,
+    EOS_TOKEN,
     SmilesDataset,
     build_vocab,
+    decode_token_ids,
+    get_special_token_ids,
     preprocess_batch,
     save_vocab,
+    select_token_ids_from_logits,
 )
 
 
@@ -1171,6 +1176,8 @@ PIN_MEMORY = torch.cuda.is_available()
 TRAIN_SPLIT = 0.9
 VAL_SPLIT = 0.1
 SEED = 42
+SANITY_CHECK_EVERY = 5
+SANITY_CHECK_SAMPLES = 16
 
 
 def set_seed(seed: int = SEED) -> None:
@@ -1210,7 +1217,7 @@ def summarize_dataset(
     logger,
 ) -> None:
     lengths = df["smiles"].str.len()
-    unique_chars = sorted(char for char in vocab.keys() if char != "<pad>")
+    unique_chars = sorted(char for char in vocab.keys() if not str(char).startswith("<"))
 
     print("\n[DATASET] Training corpus summary")
     print(f"  Total molecules: {len(df)}")
@@ -1238,6 +1245,75 @@ def summarize_dataset(
         lengths.quantile(0.95),
         max_length,
     )
+
+
+def quick_generation_sanity_check(
+    model,
+    reference_encoded,
+    char2idx,
+    idx2char,
+    *,
+    device,
+    num_samples=SANITY_CHECK_SAMPLES,
+    temperature=0.3,
+):
+    """Generate a small guided batch during training and measure basic validity."""
+    try:
+        from rdkit import Chem as _Chem
+        from rdkit import RDLogger as _RDLogger
+        _RDLogger.DisableLog("rdApp.*")
+        rdkit_available = True
+    except Exception:
+        _Chem = None
+        rdkit_available = False
+
+    model.eval()
+    tensor_data = torch.from_numpy(reference_encoded[: max(1, min(len(reference_encoded), 128))]).float().to(device)
+    with torch.no_grad():
+        mu, _ = model.encoder(tensor_data)
+        anchor_mu = mu.cpu()
+        index = torch.randint(0, len(anchor_mu), (num_samples,))
+        z = anchor_mu[index].to(device) + (torch.randn(num_samples, anchor_mu.shape[1], device=device) * temperature)
+        recon = model.decode(z)
+        indices = select_token_ids_from_logits(
+            recon,
+            char2idx,
+            temperature=max(temperature, 0.2),
+            strategy="sample",
+            top_k=5,
+            repetition_penalty=0.75,
+            min_tokens_before_stop=2,
+        )
+        decoded_rows = [decode_token_ids(seq, idx2char, char2idx=char2idx) for seq in indices]
+
+    invalid_categories: dict[str, int] = {}
+    valid_count = 0
+    for row in decoded_rows:
+        smiles = row["raw_smiles"]
+        if not smiles:
+            invalid_categories["empty"] = invalid_categories.get("empty", 0) + 1
+            continue
+        if rdkit_available:
+            mol = _Chem.MolFromSmiles(smiles)
+            if mol is not None and mol.GetNumAtoms() > 1:
+                valid_count += 1
+                continue
+        else:
+            if len(smiles) > 2:
+                valid_count += 1
+                continue
+        reason = row["termination_reason"] or "invalid"
+        invalid_categories[reason] = invalid_categories.get(reason, 0) + 1
+
+    return {
+        "validity_pct": round(100.0 * valid_count / max(1, len(decoded_rows)), 2),
+        "valid_count": valid_count,
+        "sample_count": len(decoded_rows),
+        "sample_smiles": [row["raw_smiles"] for row in decoded_rows[:5]],
+        "missing_eos_count": sum(1 for row in decoded_rows if row["first_eos_position"] is None and EOS_TOKEN in char2idx),
+        "invalid_categories": invalid_categories,
+        "decoded_rows": decoded_rows[:10],
+    }
 
 
 def train_real_dataset(
@@ -1316,6 +1392,9 @@ def train_real_dataset(
     all_metrics = []
     epoch_times = []
     checkpoint_path = MODEL_DIR / "genorova_best.pt"
+    sanity_log_path = LOG_DIR / "training_generation_sanity.jsonl"
+    if sanity_log_path.exists():
+        sanity_log_path.unlink()
 
     for epoch in range(epochs):
         print(f"\n{'=' * 70}")
@@ -1333,12 +1412,26 @@ def train_real_dataset(
         val_metrics = validate(model, val_loader, epoch, logger, kl_weight)
         epoch_time = time.time() - epoch_start
         epoch_times.append(epoch_time)
+        sanity_metrics = None
+        if epoch == 0 or (epoch + 1) % SANITY_CHECK_EVERY == 0 or (epoch + 1) == epochs:
+            sanity_metrics = quick_generation_sanity_check(
+                model=model,
+                reference_encoded=encoded_data,
+                char2idx=char2idx,
+                idx2char=idx2char,
+                device=DEVICE,
+            )
+            with open(sanity_log_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"epoch": epoch + 1, **sanity_metrics}) + "\n")
 
         metrics = {
             "epoch": epoch + 1,
             "learning_rate": optimizer.param_groups[0]["lr"],
             "kl_weight": kl_weight,
             "epoch_seconds": epoch_time,
+            "sanity_validity_pct": sanity_metrics["validity_pct"] if sanity_metrics else None,
+            "sanity_valid_count": sanity_metrics["valid_count"] if sanity_metrics else None,
+            "sanity_missing_eos_count": sanity_metrics["missing_eos_count"] if sanity_metrics else None,
             **train_metrics,
             **val_metrics,
         }
@@ -1352,6 +1445,12 @@ def train_real_dataset(
         print(f"  Learning Rate: {optimizer.param_groups[0]['lr']:.6f}")
         print(f"  KL Weight: {kl_weight:.4f}")
         print(f"  Epoch Time (CPU/GPU wall): {epoch_time:.2f}s")
+        if sanity_metrics:
+            print(
+                f"  Generation sanity: {sanity_metrics['validity_pct']:.2f}% valid "
+                f"({sanity_metrics['valid_count']}/{sanity_metrics['sample_count']})"
+            )
+            print(f"  Sample decodes: {sanity_metrics['sample_smiles']}")
 
         if (epoch + 1) % CHECKPOINT_EVERY == 0:
             save_checkpoint(model, optimizer, epoch, val_metrics["val_loss"], model_dir=str(MODEL_DIR))
@@ -1370,6 +1469,8 @@ def train_real_dataset(
                 "vocab_size": len(char2idx),
                 "max_length": model_max_length,
                 "dataset": dataset_name,
+                "uses_sequence_tokens": True,
+                "sanity_validity_pct": sanity_metrics["validity_pct"] if sanity_metrics else None,
             }
             torch.save(checkpoint, checkpoint_path)
             print(f"[CHECKPOINT] Saved best checkpoint: {checkpoint_path}")
@@ -1398,6 +1499,7 @@ def train_real_dataset(
         "vocab_size": len(char2idx),
         "max_length": model_max_length,
         "dataset": dataset_name,
+        "uses_sequence_tokens": True,
     }
     torch.save(final_checkpoint, final_checkpoint_path)
 
@@ -1423,6 +1525,7 @@ def train_real_dataset(
         "model_max_length": model_max_length,
         "device": str(DEVICE),
         "epoch_times": epoch_times,
+        "sanity_log_path": sanity_log_path,
     }
 
 

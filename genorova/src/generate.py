@@ -45,7 +45,12 @@ from tqdm import tqdm
 
 # Import our modules
 from model import VAE, MAX_SMILES_LENGTH
-from preprocessor import load_vocab
+from preprocessor import (
+    load_vocab,
+    decode_token_ids,
+    get_special_token_ids,
+    select_token_ids_from_logits,
+)
 
 # ============================================================================
 # GENERATION CONFIGURATION
@@ -251,6 +256,7 @@ class MoleculeGenerator:
         self.invalid_count = 0
         self.novel_count = 0
         self.duplicate_count = 0
+        self.last_debug_rows: list[dict[str, Any]] = []
         
     def decode_indices_to_smiles(self, indices: torch.Tensor) -> List[str]:
         """
@@ -262,25 +268,25 @@ class MoleculeGenerator:
         Returns:
             List[str]: SMILES strings
         """
-        smiles_list = []
-        
-        for idx_seq in indices:
-            chars = []
-            for idx in idx_seq:
-                idx_val = int(idx.item())
-                # Handle indices out of vocabulary range
-                if 0 <= idx_val < len(self.idx2char):
-                    chars.append(self.idx2char[idx_val])
-                else:
-                    # Out of range - use padding character or skip
-                    chars.append("")
-            
-            # Join and strip padding
-            smiles = "".join(chars).strip()
-            if smiles:  # Only keep non-empty SMILES
-                smiles_list.append(smiles)
-        
-        return smiles_list
+        self.last_debug_rows = [
+            decode_token_ids(idx_seq, self.idx2char, char2idx=self.char2idx)
+            for idx_seq in indices
+        ]
+        return [row["raw_smiles"] for row in self.last_debug_rows if row["raw_smiles"]]
+
+    def save_debug_artifact(self, filename: str = "generated_debug.csv") -> Path:
+        """Persist a compact decode-debug artifact for the latest generation run."""
+        debug_path = GENERATE_OUTPUT_DIR / filename
+        if not self.last_debug_rows:
+            pd.DataFrame(columns=["token_ids", "raw_smiles"]).to_csv(debug_path, index=False)
+            return debug_path
+
+        pd.DataFrame(self.last_debug_rows).assign(
+            token_ids=lambda df: df["token_ids"].map(lambda values: " ".join(map(str, values))),
+            raw_tokens=lambda df: df["raw_tokens"].map(lambda values: " ".join(values)),
+            effective_token_ids=lambda df: df["effective_token_ids"].map(lambda values: " ".join(map(str, values))),
+        ).to_csv(debug_path, index=False)
+        return debug_path
     
     def validate_smiles(self, smiles: str) -> Tuple[bool, Dict]:
         """
@@ -356,8 +362,19 @@ class MoleculeGenerator:
             # Decode through decoder
             recon_x = self.model.decode(z)
             
-            # Convert to indices via argmax
-            indices = torch.argmax(recon_x, dim=2)
+            # Sequence-aware token selection:
+            # - keep BOS at position 0 when available
+            # - prefer EOS over PAD for stop decisions
+            # - penalize repetitive token collapse
+            indices = select_token_ids_from_logits(
+                recon_x,
+                self.char2idx,
+                temperature=TEMPERATURE,
+                strategy="sample",
+                top_k=5,
+                repetition_penalty=0.75,
+                min_tokens_before_stop=2,
+            )
             
             # Convert indices to SMILES
             smiles_list = self.decode_indices_to_smiles(indices)
@@ -443,6 +460,9 @@ class MoleculeGenerator:
             print(f"\n[*] First 10 generated molecules:")
             for i, (smiles, props) in enumerate(zip(all_smiles[:10], all_properties[:10])):
                 print(f"    {i+1:2}. {smiles:<40} MW={props['mw']:6.1f} QED={props['qed']:5.3f}")
+
+        debug_path = self.save_debug_artifact()
+        print(f"    Decode debug: {debug_path}")
         
         return results_df
     

@@ -36,6 +36,7 @@ DATE: April 2026
 """
 
 import sys
+import argparse
 import re
 import json
 import time
@@ -60,7 +61,16 @@ from torch.utils.data import DataLoader, random_split
 sys.path.insert(0, str(Path(__file__).parent))
 
 from model import VAE, MAX_SMILES_LENGTH
-from preprocessor import build_vocab, preprocess_batch, SmilesDataset, load_vocab
+from preprocessor import (
+    build_vocab,
+    preprocess_batch,
+    SmilesDataset,
+    save_vocab,
+    decode_token_ids,
+    get_special_token_ids,
+    select_token_ids_from_logits,
+)
+from data_loader import load_smiles_dataset, load_smiles_from_csv
 
 # ============================================================================
 # PIPELINE CONFIGURATION
@@ -71,6 +81,7 @@ BATCH_SIZE  = 64
 LR          = 0.001
 LR_DECAY    = 0.95            # reduce LR by 5% every 10 epochs
 GRAD_CLIP   = 1.0
+SANITY_CHECK_EVERY = 5
 
 # ---- CYCLIC KL ANNEALING ----
 # KL weight cycles from 0 → KL_MAX_WEIGHT → 0 every KL_CYCLE_LENGTH epochs.
@@ -105,44 +116,109 @@ OUTPUT_DIR     = ROOT_DIR / "outputs"
 MODELS_DIR     = OUTPUT_DIR / "models"
 GENERATED_DIR  = OUTPUT_DIR / "generated"
 IMAGES_DIR     = OUTPUT_DIR / "molecule_images"
+VOCAB_DIR      = OUTPUT_DIR
 
 for d in [MODELS_DIR / "diabetes", MODELS_DIR / "infection",
           GENERATED_DIR, IMAGES_DIR]:
     d.mkdir(parents=True, exist_ok=True)
+
+SEED = 42
 
 
 # ============================================================================
 # SECTION 1: TRAINING
 # ============================================================================
 
-def load_real_dataset(csv_path, vocab_path):
+def set_seed(seed: int = SEED):
+    """Make training and dataset splits reproducible."""
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _prepare_training_smiles(smiles_list):
+    """Normalize a raw SMILES list into a stripped, de-duplicated list."""
+    cleaned = []
+    seen = set()
+    for smiles in smiles_list:
+        normalized = str(smiles).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        cleaned.append(normalized)
+    if not cleaned:
+        raise ValueError("No usable SMILES strings found for training.")
+    return cleaned
+
+
+def load_primary_training_dataset(dataset_name, max_samples=None, min_len=10, max_len=100):
     """
-    Load real ChEMBL molecules from CSV and pre-built vocabulary from JSON.
-
-    The vocabulary was built by preprocessor.py and saved to disk.
-    Loading it here ensures the same character mapping is used for
-    both training and generation -- preventing dimension mismatches.
-
-    Args:
-        csv_path (str or Path): path to the molecules CSV (must have 'smiles' column)
-        vocab_path (str or Path): path to the vocabulary JSON file
-
-    Returns:
-        tuple: (encoded_data np.ndarray, char2idx dict, idx2char dict, vocab_size int)
+    Load the primary pretraining corpus via the shared dataset loader.
     """
-    print(f"\n[*] Loading dataset: {Path(csv_path).name}")
-    df = pd.read_csv(csv_path)
-    smiles_list = df["smiles"].dropna().tolist()
-    print(f"   [OK] {len(smiles_list)} SMILES loaded")
+    print(f"\n[*] Stage: PRETRAIN DATA LOAD")
+    print(f"    Source type: shared dataset loader")
+    print(f"    Dataset: {dataset_name}")
+    if max_samples is not None:
+        print(f"    Sample cap: {max_samples}")
 
-    # Load pre-built vocabulary (must match generate step)
-    print(f"[*] Loading vocabulary: {Path(vocab_path).name}")
-    char2idx, idx2char = load_vocab(str(vocab_path))
+    dataset_df = load_smiles_dataset(
+        name=dataset_name,
+        max_samples=max_samples,
+        min_len=min_len,
+        max_len=max_len,
+    )
+    load_stats = dataset_df.attrs.get("load_stats", {})
+    smiles_list = _prepare_training_smiles(dataset_df["smiles"].tolist())
+
+    print(f"    [OK] Loaded {len(smiles_list)} pretraining molecules")
+    if load_stats:
+        print(f"    [OK] Loader stats: {load_stats}")
+
+    return {
+        "stage_name": "pretrain",
+        "source_label": f"dataset:{dataset_name}",
+        "smiles_list": smiles_list,
+        "load_stats": load_stats,
+    }
+
+
+def load_finetune_dataset(csv_path):
+    """
+    Load optional fine-tuning molecules from a per-disease CSV.
+    """
+    csv_path = Path(csv_path)
+    print(f"\n[*] Stage: FINE-TUNE DATA LOAD")
+    print(f"    Source type: optional fine-tune CSV")
+    print(f"    CSV path: {csv_path}")
+
+    smiles_list = _prepare_training_smiles(load_smiles_from_csv(str(csv_path)))
+    print(f"    [OK] Loaded {len(smiles_list)} fine-tuning molecules")
+
+    return {
+        "stage_name": "finetune",
+        "source_label": f"finetune_csv:{csv_path.name}",
+        "smiles_list": smiles_list,
+        "load_stats": {"csv_path": str(csv_path), "rows": len(smiles_list)},
+    }
+
+
+def encode_training_smiles(smiles_list, vocab_path, char2idx=None, idx2char=None):
+    """
+    Build or reuse a vocabulary, then encode SMILES into one-hot tensors.
+    """
+    smiles_list = _prepare_training_smiles(smiles_list)
+
+    if char2idx is None or idx2char is None:
+        print(f"[*] Building vocabulary from current training corpus...")
+        char2idx, idx2char = build_vocab(smiles_list)
+        save_vocab(char2idx, str(vocab_path))
+        print(f"   [OK] Vocabulary saved: {vocab_path}")
+    else:
+        print(f"[*] Reusing existing vocabulary for this stage...")
+
     vocab_size = len(char2idx)
-    print(f"   [OK] Vocabulary size: {vocab_size}")
-
-    # Encode all SMILES to one-hot tensors
-    print(f"[*] Encoding SMILES to one-hot tensors...")
+    print(f"[*] Encoding {len(smiles_list)} SMILES to one-hot tensors...")
     encoded = preprocess_batch(smiles_list, char2idx)
     print(f"   [OK] Tensor shape: {encoded.shape}")
     print(f"   [OK] VAE input dim: {MAX_SMILES_LENGTH} x {vocab_size} = {MAX_SMILES_LENGTH * vocab_size}")
@@ -150,7 +226,7 @@ def load_real_dataset(csv_path, vocab_path):
     return encoded, smiles_list, char2idx, idx2char, vocab_size
 
 
-def make_dataloaders(encoded, smiles_list):
+def make_dataloaders(encoded, smiles_list, batch_size=BATCH_SIZE):
     """
     Split encoded data into train / val DataLoaders.
 
@@ -167,16 +243,90 @@ def make_dataloaders(encoded, smiles_list):
     n_train = int(0.85 * len(dataset))
     n_val   = len(dataset) - n_train
 
-    train_ds, val_ds = random_split(dataset, [n_train, n_val])
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  drop_last=True)
-    val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False)
+    train_ds, val_ds = random_split(
+        dataset,
+        [n_train, n_val],
+        generator=torch.Generator().manual_seed(SEED),
+    )
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
 
     print(f"   [OK] Train: {len(train_ds)} molecules ({len(train_loader)} batches)")
     print(f"   [OK] Val:   {len(val_ds)}   molecules ({len(val_loader)} batches)")
     return train_loader, val_loader, train_ds
 
 
-def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS):
+def quick_generation_sanity_check(
+    model,
+    reference_encoded,
+    char2idx,
+    idx2char,
+    device,
+    *,
+    num_samples=16,
+    temperature=0.3,
+):
+    """
+    Generate a tiny guided batch during training so we can spot garbage early.
+    """
+    try:
+        from rdkit import Chem as _Chem
+        from rdkit import RDLogger as _RDLogger
+        _RDLogger.DisableLog("rdApp.*")
+        rdkit_available = True
+    except Exception:
+        rdkit_available = False
+        _Chem = None
+
+    model.eval()
+    tensor_data = torch.from_numpy(reference_encoded[: max(1, min(len(reference_encoded), 128))]).float().to(device)
+    decoded_rows = []
+
+    with torch.no_grad():
+        mu, _ = model.encoder(tensor_data)
+        mu = mu.cpu()
+        index = torch.randint(0, len(mu), (num_samples,))
+        z = mu[index].to(device) + (torch.randn(num_samples, mu.shape[1], device=device) * temperature)
+        recon = model.decode(z)
+        indices = select_token_ids_from_logits(
+            recon,
+            char2idx,
+            temperature=max(temperature, 0.2),
+            strategy="sample",
+            top_k=5,
+            repetition_penalty=0.75,
+            min_tokens_before_stop=2,
+        )
+        decoded_rows = [decode_token_ids(seq, idx2char, char2idx=char2idx) for seq in indices]
+
+    validity_flags = []
+    for row in decoded_rows:
+        smiles = row["raw_smiles"]
+        if not smiles:
+            validity_flags.append(False)
+            continue
+        if not rdkit_available:
+            validity_flags.append(len(smiles) > 2)
+            continue
+        mol = _Chem.MolFromSmiles(smiles)
+        validity_flags.append(mol is not None and mol.GetNumAtoms() > 1)
+
+    valid_count = sum(validity_flags)
+    return {
+        "validity_pct": round(100.0 * valid_count / max(1, len(decoded_rows)), 2),
+        "valid_count": valid_count,
+        "sample_count": len(decoded_rows),
+        "samples": [row["raw_smiles"] for row in decoded_rows[:5]],
+        "termination_reasons": {
+            reason: sum(1 for row in decoded_rows if row["termination_reason"] == reason)
+            for reason in sorted({row["termination_reason"] for row in decoded_rows})
+        },
+        "missing_eos_count": sum(1 for row in decoded_rows if row["first_eos_position"] is None and "<eos>" in char2idx),
+    }
+
+
+def train_vae(disease_label, stage_name, source_label, smiles_list, checkpoint_dir,
+              epochs=EPOCHS, char2idx=None, idx2char=None, model=None):
     """
     Train the Variational Autoencoder on one disease dataset.
 
@@ -187,9 +337,10 @@ def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS
     - Saves best checkpoint whenever validation loss improves
 
     Args:
-        disease_label (str): "diabetes" or "infection" (used for labels)
-        csv_path (str or Path): path to molecules CSV
-        vocab_path (str or Path): path to vocabulary JSON
+        disease_label (str): label used for checkpoint naming
+        stage_name (str): training stage name, e.g. pretrain or finetune
+        source_label (str): human-readable data source label
+        smiles_list (list[str]): training molecules for this stage
         checkpoint_dir (str or Path): where to save model checkpoints
         epochs (int): number of training epochs
 
@@ -200,12 +351,17 @@ def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'#'*70}")
-    print(f"# TRAINING VAE -- {disease_label.upper()}")
+    print(f"# TRAINING VAE -- {disease_label.upper()} [{stage_name.upper()}]")
     print(f"{'#'*70}")
+    print(f"[*] Dataset source: {source_label}")
+    print(f"[*] Molecules in stage corpus: {len(smiles_list)}")
 
-    # Load data
-    encoded, smiles_list, char2idx, idx2char, vocab_size = load_real_dataset(
-        csv_path, vocab_path
+    vocab_path = VOCAB_DIR / f"vocabulary_{disease_label}_{stage_name}.json"
+    encoded, smiles_list, char2idx, idx2char, vocab_size = encode_training_smiles(
+        smiles_list=smiles_list,
+        vocab_path=vocab_path,
+        char2idx=char2idx,
+        idx2char=idx2char,
     )
 
     # DataLoaders
@@ -218,8 +374,11 @@ def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS
     print(f"[*] Building VAE (vocab_size={vocab_size})...")
 
     # Suppress model's own print output for cleaner logging
-    with contextlib.redirect_stdout(io.StringIO()):
-        model = VAE(vocab_size=vocab_size).to(device)
+    if model is None:
+        with contextlib.redirect_stdout(io.StringIO()):
+            model = VAE(vocab_size=vocab_size).to(device)
+    else:
+        model = model.to(device)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"   [OK] Model ready -- {total_params:,} trainable parameters")
@@ -233,18 +392,20 @@ def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS
     best_epoch     = 0
     kl_weight      = 0.0          # will be overwritten by cyclic formula each epoch
 
-    best_ckpt_path = checkpoint_dir / f"genorova_{disease_label}_best.pt"
+    best_ckpt_path = checkpoint_dir / f"genorova_{disease_label}_{stage_name}_best.pt"
+    final_ckpt_path = checkpoint_dir / f"genorova_{disease_label}_{stage_name}_final.pt"
 
     print(f"\n[*] Starting training for {epochs} epochs...")
     print(f"    Batch size: {BATCH_SIZE}  |  LR: {LR}")
     print(f"    Cyclic KL annealing: 0.0 -> {KL_MAX_WEIGHT} per {KL_CYCLE_LENGTH}-epoch cycle")
     print(f"    Free bits: {FREE_BITS} (min KL per latent dim -- prevents collapse)")
     print(f"    Architecture: 3-layer encoder/decoder (increased capacity)")
-    print("-" * 75)
-    print(f"{'Epoch':>6} | {'Train Loss':>11} | {'Val Loss':>10} | {'KL Weight':>9} | {'mu_std':>7} | {'LR':>8} | Note")
-    print("-" * 75)
+    print("-" * 104)
+    print(f"{'Epoch':>6} | {'Train Loss':>11} | {'Val Loss':>10} | {'KL Weight':>9} | {'mu_std':>7} | {'Sanity%':>7} | {'LR':>8} | Note")
+    print("-" * 104)
 
     start_time = time.time()
+    sanity_history = []
 
     import math  # for cosine annealing formula
 
@@ -295,6 +456,21 @@ def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS
         # Track mu_std to detect posterior collapse
         all_val_mu = torch.cat(val_mu_list, dim=0)
         mu_std_now = all_val_mu.std().item()
+        sanity_metrics = None
+        if epoch == 1 or epoch % SANITY_CHECK_EVERY == 0 or epoch == epochs:
+            sanity_metrics = quick_generation_sanity_check(
+                model=model,
+                reference_encoded=encoded,
+                char2idx=char2idx,
+                idx2char=idx2char,
+                device=device,
+            )
+            sanity_history.append({"epoch": epoch, **sanity_metrics})
+            print(
+                f"      sanity: validity={sanity_metrics['validity_pct']:.2f}% "
+                f"({sanity_metrics['valid_count']}/{sanity_metrics['sample_count']}) "
+                f"samples={sanity_metrics['samples']}"
+            )
 
         # ---- SAVE BEST ----
         note = ""
@@ -311,7 +487,11 @@ def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS
                 "kl_weight":      kl_weight,
                 "vocab_size":     vocab_size,
                 "disease":        disease_label,
+                "stage_name":     stage_name,
+                "source_label":   source_label,
                 "mu_std":         mu_std_now,
+                "uses_sequence_tokens": True,
+                "sanity_validity_pct": sanity_metrics["validity_pct"] if sanity_metrics else None,
             }
             torch.save(checkpoint, best_ckpt_path)
 
@@ -321,13 +501,33 @@ def train_vae(disease_label, csv_path, vocab_path, checkpoint_dir, epochs=EPOCHS
 
         # Print one line per epoch
         print(f"{epoch:>6} | {avg_train:>11.5f} | {avg_val:>10.5f} | "
-              f"{kl_weight:>9.3f} | {mu_std_now:>7.4f} | {lr_now:>8.5f} | {note}")
+              f"{kl_weight:>9.3f} | {mu_std_now:>7.4f} | "
+              f"{(sanity_metrics['validity_pct'] if sanity_metrics else float('nan')):>7.2f} | {lr_now:>8.5f} | {note}")
 
     elapsed = time.time() - start_time
+    final_checkpoint = {
+        "epoch": epochs,
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "best_val_loss": best_val_loss,
+        "best_epoch": best_epoch,
+        "kl_weight": kl_weight,
+        "vocab_size": vocab_size,
+        "disease": disease_label,
+        "stage_name": stage_name,
+        "source_label": source_label,
+        "uses_sequence_tokens": True,
+        "sanity_history": sanity_history,
+    }
+    torch.save(final_checkpoint, final_ckpt_path)
+    sanity_path = checkpoint_dir / f"genorova_{disease_label}_{stage_name}_sanity.json"
+    sanity_path.write_text(json.dumps(sanity_history, indent=2), encoding="utf-8")
     print("-" * 70)
     print(f"[OK] Training complete in {elapsed/60:.1f} minutes")
     print(f"[OK] Best val loss: {best_val_loss:.5f} at epoch {best_epoch}")
     print(f"[OK] Best checkpoint: {best_ckpt_path}")
+    print(f"[OK] Final checkpoint: {final_ckpt_path}")
+    print(f"[OK] Sanity log: {sanity_path}")
 
     return model, char2idx, idx2char, vocab_size, device, smiles_list, encoded
 
@@ -389,8 +589,7 @@ def guided_generate(model, encoded_data, char2idx, idx2char, vocab_size,
     all_generated = []
     batch_size     = 64   # encode training data in batches to save memory
 
-    # Index of the padding token — used as end-of-sequence marker during decoding
-    pad_idx = char2idx.get("<pad>", -1)
+    token_ids = get_special_token_ids(char2idx)
 
     with torch.no_grad():
         # Encode all training molecules to get their latent means
@@ -435,23 +634,19 @@ def guided_generate(model, encoded_data, char2idx, idx2char, vocab_size,
             # Decode to get molecule logits
             recon = model.decode(z)          # [batch, 120, vocab_size]
 
-            # Argmax over vocab to get character indices
-            indices = torch.argmax(recon, dim=2)  # [batch, 120]
+            indices = select_token_ids_from_logits(
+                recon,
+                char2idx,
+                temperature=max(temperature, 0.2),
+                strategy="sample",
+                top_k=5,
+                repetition_penalty=0.75,
+                min_tokens_before_stop=2,
+            )
 
-            # Decode indices to SMILES strings.
-            # Stop at the first <pad> token — it marks the end of the sequence.
-            # Never skip over pad tokens in the middle — that joins partial SMILES
-            # fragments and always produces chemically invalid strings.
             for seq in indices:
-                chars = []
-                for tok in seq:
-                    tok_int = int(tok.item())
-                    if tok_int == pad_idx:
-                        break          # end of sequence — stop decoding here
-                    ch = idx2char.get(tok_int, "")
-                    if ch:
-                        chars.append(ch)
-                smiles = "".join(chars).strip()
+                decoded = decode_token_ids(seq, idx2char, char2idx=char2idx)
+                smiles = decoded["raw_smiles"]
                 if smiles:
                     all_generated.append(smiles)
 
@@ -478,6 +673,8 @@ def guided_generate(model, encoded_data, char2idx, idx2char, vocab_size,
 
     validity_pct = 100 * len(valid) / max(1, len(all_generated))
     print(f"    Valid unique SMILES: {len(valid)} ({validity_pct:.1f}% validity)")
+    if token_ids["eos"] is not None:
+        print(f"    [DEBUG] Decoding used explicit EOS/PAD token handling")
     return valid
 
 
@@ -640,34 +837,65 @@ def print_top_candidates(df, disease_label, n=10):
 # SECTION 5: FULL SINGLE-DISEASE PIPELINE
 # ============================================================================
 
-def run_disease_pipeline(disease_label, csv_path, vocab_path,
-                         output_csv, epochs=EPOCHS):
+def run_disease_pipeline(disease_label, pretrain_dataset, output_csv,
+                         pretrain_epochs=EPOCHS, finetune_csv=None,
+                         finetune_epochs=0, pretrain_max_samples=None,
+                         skip_generation=False):
     """
     Run the complete pipeline for one disease area:
     train -> generate -> score -> save -> print.
 
     Args:
-        disease_label (str): "diabetes" or "infection"
-        csv_path (Path): path to raw molecules CSV
-        vocab_path (Path): path to vocabulary JSON
+        disease_label (str): label used for output/checkpoint naming
+        pretrain_dataset (str): shared dataset-loader source name
         output_csv (Path): where to save scored candidates CSV
-        epochs (int): training epochs
+        pretrain_epochs (int): pretraining epochs
+        finetune_csv (Path | None): optional fine-tuning CSV
+        finetune_epochs (int): fine-tuning epochs
+        pretrain_max_samples (int | None): optional sample cap for pretraining
+        skip_generation (bool): if True, stop after training/checkpoint save
 
     Returns:
         pd.DataFrame: all scored candidates (sorted best first)
     """
     checkpoint_dir = MODELS_DIR / disease_label
 
-    # ---- STEP 1: TRAIN ----
+    # ---- STEP 1: PRETRAIN ----
+    primary_data = load_primary_training_dataset(
+        dataset_name=pretrain_dataset,
+        max_samples=pretrain_max_samples,
+    )
     model, char2idx, idx2char, vocab_size, device, smiles_list, encoded = train_vae(
-        disease_label  = disease_label,
-        csv_path       = csv_path,
-        vocab_path     = vocab_path,
-        checkpoint_dir = checkpoint_dir,
-        epochs         = epochs,
+        disease_label=disease_label,
+        stage_name="pretrain",
+        source_label=primary_data["source_label"],
+        smiles_list=primary_data["smiles_list"],
+        checkpoint_dir=checkpoint_dir,
+        epochs=pretrain_epochs,
     )
 
-    # ---- STEP 2: GENERATE ----
+    # ---- STEP 2: OPTIONAL FINE-TUNE ----
+    if finetune_csv:
+        finetune_data = load_finetune_dataset(finetune_csv)
+        model, char2idx, idx2char, vocab_size, device, smiles_list, encoded = train_vae(
+            disease_label=disease_label,
+            stage_name="finetune",
+            source_label=finetune_data["source_label"],
+            smiles_list=finetune_data["smiles_list"],
+            checkpoint_dir=checkpoint_dir,
+            epochs=finetune_epochs,
+            char2idx=char2idx,
+            idx2char=idx2char,
+            model=model,
+        )
+    else:
+        print(f"\n[*] No fine-tune CSV provided for {disease_label}; using pretrained model directly.")
+
+    if skip_generation:
+        print(f"\n[*] Smoke-test mode active; skipping generation/scoring for {disease_label}.")
+        return pd.DataFrame(), smiles_list
+
+    # ---- STEP 3: GENERATE ----
     print(f"\n{'='*70}")
     print(f"GENERATING MOLECULES -- {disease_label.upper()}")
     print(f"{'='*70}")
@@ -735,19 +963,19 @@ def run_disease_pipeline(disease_label, csv_path, vocab_path,
         print(f"    [OK] {len(valid_smiles)} molecules from training library pass RDKit check")
         print(f"    [OK] Will score top {min(len(valid_smiles), MIN_VALID_TARGET)}")
 
-    # ---- STEP 3: SCORE (all valid molecules, up to 200) ----
+    # ---- STEP 4: SCORE (all valid molecules, up to 200) ----
     results_df = score_molecules_batch(
         smiles_list   = valid_smiles,
         disease_label = disease_label,
         max_score     = min(len(valid_smiles), 200),
     )
 
-    # ---- STEP 4: SAVE ----
+    # ---- STEP 5: SAVE ----
     if len(results_df) > 0:
         results_df.to_csv(output_csv, index_label="rank")
         print(f"\n[OK] Saved {len(results_df)} scored candidates to: {output_csv}")
 
-    # ---- STEP 5: PRINT TOP 10 ----
+    # ---- STEP 6: PRINT TOP 10 ----
     if len(results_df) > 0:
         print_top_candidates(results_df, disease_label, n=10)
 
@@ -1083,5 +1311,155 @@ def main():
     print(f"Total time: {total_time:.1f} minutes\n")
 
 
+def build_cli():
+    """Build the command-line interface for the refactored pipeline."""
+    parser = argparse.ArgumentParser(description="Run the Genorova training and discovery pipeline.")
+    parser.add_argument("--disease-label", default="diabetes",
+                        help="Label used for checkpoints and generated outputs.")
+    parser.add_argument("--pretrain-dataset", default="moses",
+                        choices=["moses", "chembl_subset"],
+                        help="Primary training corpus loaded through data_loader.load_smiles_dataset().")
+    parser.add_argument("--finetune-csv", default=None,
+                        help="Optional per-disease CSV used only for fine-tuning.")
+    parser.add_argument("--pretrain-epochs", type=int, default=EPOCHS,
+                        help="Epochs to run on the primary pretraining dataset.")
+    parser.add_argument("--finetune-epochs", type=int, default=1,
+                        help="Epochs to run on the optional fine-tuning CSV.")
+    parser.add_argument("--pretrain-max-samples", type=int, default=None,
+                        help="Optional sample cap for the primary dataset loader.")
+    parser.add_argument("--skip-generation", action="store_true",
+                        help="Only run training stages and checkpoint saves.")
+    return parser
+
+
+def main_cli():
+    """CLI entrypoint for shared-data pretraining and optional fine-tuning."""
+    args = build_cli().parse_args()
+    set_seed(SEED)
+
+    print("\n" + "#"*70)
+    print("# GENOROVA AI -- DRUG DISCOVERY PIPELINE")
+    print("# Shared-data pretraining + optional disease fine-tuning")
+    print(f"# Disease label: {args.disease_label}")
+    print(f"# Pretrain dataset: {args.pretrain_dataset}")
+    print(f"# Fine-tune CSV: {args.finetune_csv or 'none'}")
+    print(f"# Epochs: pretrain={args.pretrain_epochs} | finetune={args.finetune_epochs}")
+    print(f"# Batch size: {BATCH_SIZE}")
+    print("#"*70)
+
+    try:
+        from rdkit import rdBase
+        rdkit_version = rdBase.rdkitVersion
+        print(f"\n[OK] RDKit version: {rdkit_version}")
+        print(f"[OK] Mode: REAL RDKit validation (exact chemistry, not approximation)")
+        rdkit_mode = True
+    except Exception as e:
+        print(f"\n[!] RDKit not available: {e}")
+        print(f"[!] Mode: Pure-Python approximation (fallback)")
+        rdkit_mode = False
+
+    print(f"[OK] Molecule images will be saved to: {IMAGES_DIR}")
+    print(f"[OK] Pretraining will use data_loader.load_smiles_dataset() as the primary corpus")
+    if args.finetune_csv:
+        print(f"[OK] Fine-tuning will use optional CSV only after pretraining")
+
+    start_wall = time.time()
+
+    print(f"\n{'='*70}")
+    print(f"RUNNING PIPELINE FOR: {args.disease_label.upper()}")
+    print(f"{'='*70}")
+
+    output_csv = GENERATED_DIR / f"{args.disease_label}_candidates_validated.csv"
+    results_df, generated_smiles = run_disease_pipeline(
+        disease_label=args.disease_label,
+        pretrain_dataset=args.pretrain_dataset,
+        output_csv=output_csv,
+        pretrain_epochs=args.pretrain_epochs,
+        finetune_csv=args.finetune_csv,
+        finetune_epochs=args.finetune_epochs,
+        pretrain_max_samples=args.pretrain_max_samples,
+        skip_generation=args.skip_generation,
+    )
+
+    total_time = (time.time() - start_wall) / 60
+
+    print(f"\n{'#'*70}")
+    print("# GENOROVA AI -- RUN SUMMARY")
+    print(f"{'#'*70}")
+    print(f"  RDKit version:    {rdkit_version if rdkit_mode else 'NOT AVAILABLE (fallback mode)'}")
+    print(f"  Validation mode:  {'Real RDKit Chem.MolFromSmiles()' if rdkit_mode else 'Pure-Python approximation'}")
+    print(f"  Disease label:    {args.disease_label}")
+    print(f"  Pretrain dataset: {args.pretrain_dataset}")
+    print(f"  Fine-tune CSV:    {args.finetune_csv or 'none'}")
+    print(f"  Runtime:          {total_time:.1f} minutes")
+    print(f"  Candidate pool:   {len(generated_smiles)}")
+    print(f"  Scored results:   {len(results_df)}")
+
+    if args.skip_generation:
+        print("\n[OK] Training smoke-test path complete; generation and scoring were skipped by request.")
+        return
+
+    if len(results_df) > 0:
+        print(f"\n{'='*70}")
+        print(f"TOP 5 {args.disease_label.upper()} CANDIDATES")
+        print(f"{'='*70}")
+        print(f"{'Rank':>4} | {'Score':>7} | {'QED':>5} | {'SA':>5} | "
+              f"{'MW':>6} | {'LogP':>5} | {'Lip':>3} | {'Verdict':<16} | SMILES")
+        print("-" * 90)
+        for rank, row in results_df.head(5).iterrows():
+            smi = row["smiles"][:30] + "..." if len(row["smiles"]) > 30 else row["smiles"]
+            lip = "Y" if row["passes_lipinski"] else "N"
+            print(f"{rank:>4} | {row['clinical_score']:>7.4f} | {row['qed_score']:>5.3f} | "
+                  f"{row['sa_score']:>5.2f} | {row['molecular_weight']:>6.1f} | "
+                  f"{row['logp']:>5.2f} | {lip:>3} | {row['recommendation']:<16} | {smi}")
+
+        best = results_df.iloc[0]
+        print(f"\n{'='*70}")
+        print("BEST OVERALL MOLECULE DISCOVERED BY GENOROVA AI")
+        print(f"{'='*70}")
+        print(f"\n  SMILES:            {best['smiles']}")
+        print(f"  Disease target:    {args.disease_label}")
+        print(f"  Clinical score:    {best['clinical_score']:.4f}")
+        print(f"  QED score:         {best['qed_score']:.4f}  (0-1, higher = more drug-like)")
+        print(f"  SA score:          {best['sa_score']:.4f}  (1-10, lower = easier to synthesize)")
+        print(f"  Molecular weight:  {best['molecular_weight']:.2f} Da")
+        print(f"  LogP:              {best['logp']:.3f}")
+        print(f"  TPSA:              {best['tpsa']:.1f} A^2")
+        print(f"  Passes Lipinski:   {best['passes_lipinski']}")
+        print(f"  Recommendation:    {best['recommendation']}")
+
+        print(f"\n{'='*70}")
+        print("GENERATING 2D STRUCTURE IMAGES")
+        print(f"{'='*70}")
+        images = generate_structure_images(results_df, args.disease_label, n_top=3)
+
+        print(f"\n[*] Generating HTML discovery report...")
+        try:
+            from report_generator import generate_report
+            empty_df = pd.DataFrame()
+            report_path = generate_report(
+                diabetes_df=results_df if args.disease_label == "diabetes" else empty_df,
+                infection_df=results_df if args.disease_label != "diabetes" else empty_df,
+                runtime_min=total_time,
+            )
+            print(f"[OK] HTML report: {report_path}")
+        except Exception as e:
+            print(f"  [!] Report generation failed: {e}")
+
+        print(f"\n{'='*70}")
+        print("ALL FILES SAVED:")
+        print(f"{'='*70}")
+        print(f"  Candidates CSV: {output_csv}")
+        if images:
+            print(f"  Structure images ({len(images)} total):")
+            for p in images:
+                print(f"    {Path(p).name}")
+    else:
+        print("\n[!] No candidates were produced in this run.")
+
+    print(f"\nGenorova AI run COMPLETE.")
+    print(f"Total time: {total_time:.1f} minutes\n")
+
+
 if __name__ == "__main__":
-    main()
+    main_cli()
