@@ -2,12 +2,12 @@
 Genorova AI — FastAPI Web Service
 ===================================
 
-REST API for the Genorova AI drug discovery platform.
-Exposes molecule generation, scoring, and reporting over HTTP.
+REST API for the Genorova computational molecule analysis platform.
+Exposes conservative ranked-molecule retrieval, scoring, and reporting over HTTP.
 
 ENDPOINTS:
     GET  /health           — service status
-    POST /generate         — generate drug candidates for a disease
+    POST /generate         — return ranked computational molecules for a disease
     POST /score            — score a single SMILES string
     GET  /best_molecules   — top 10 molecules discovered so far
     GET  /report           — HTML discovery report
@@ -50,15 +50,16 @@ FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 
 CHAT_SESSION_MEMORY: dict[str, dict[str, Any]] = {}
 BEST_MOLECULE = "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2"
+PROTOTYPE_STATUS = "prototype_research_support"
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title       = "Genorova AI — Drug Discovery API",
+    title       = "Genorova AI — Computational Molecule Analysis API",
     description = (
-        "Generative AI platform for diabetes and infectious disease drug design. "
-        "Uses a Variational Autoencoder trained on ChEMBL data, scored against "
-        "real Phase 3 clinical trial endpoints."
+        "Prototype research-support API for computational molecule scoring, "
+        "comparison, and conservative ranked-molecule retrieval. Outputs are "
+        "not experimentally validated and should not be treated as treatment advice."
     ),
     version     = "1.0.0",
     contact     = {
@@ -121,6 +122,91 @@ def _load_db_top(n: int = 10) -> list[dict]:
         return []
 
 
+def _ranking_label(score: float | None = None, recommendation: str | None = None) -> str:
+    """Map internal ranking buckets to more honest user-facing wording."""
+    if score is not None:
+        if score >= 0.85:
+            return "Higher-priority computational lead"
+        if score >= 0.60:
+            return "Model-ranked molecule needing optimization"
+        return "Low-priority computational result"
+
+    normalized = str(recommendation or "").lower()
+    if "strong" in normalized:
+        return "Higher-priority computational lead"
+    if "border" in normalized:
+        return "Model-ranked molecule needing optimization"
+    return "Low-priority computational result"
+
+
+def _trust_block(
+    *,
+    validation_status: str,
+    confidence_note: str,
+    result_source: str,
+    fallback_used: bool = False,
+    limitations: list[str] | None = None,
+    recommended_next_step: str | None = None,
+) -> dict[str, Any]:
+    """Return stable trust metadata for API and chat responses."""
+    return {
+        "prototype_status": PROTOTYPE_STATUS,
+        "validation_status": validation_status,
+        "confidence_note": confidence_note,
+        "result_source": result_source,
+        "fallback_used": fallback_used,
+        "limitations": limitations or [
+            "This is a computational research-support result.",
+            "The system is not experimentally validated and should not be treated as a treatment recommendation.",
+        ],
+        "recommended_next_step": recommended_next_step or "Compare this output with known valid reference molecules before advancing it.",
+    }
+
+
+def _reference_smiles_for_disease(disease: str) -> list[str]:
+    """Return a small safe fallback reference set when generated candidates are unavailable."""
+    disease = disease.lower()
+    if disease == "diabetes":
+        try:
+            from scorer import APPROVED_DIABETES_DRUGS
+            return list(APPROVED_DIABETES_DRUGS.values())
+        except Exception:
+            return []
+    return []
+
+
+def _fallback_reference_candidates(disease: str, count: int) -> list[dict[str, Any]]:
+    """Score known reference molecules as an honest fallback when no candidate set is available."""
+    fallback_rows = []
+    seen: set[str] = set()
+    for smiles in _reference_smiles_for_disease(disease):
+        if smiles in seen:
+            continue
+        seen.add(smiles)
+        try:
+            payload = _score_smiles_payload(smiles)
+        except HTTPException:
+            continue
+        fallback_rows.append(
+            {
+                "smiles": payload.get("smiles"),
+                "molecular_weight": payload.get("molecular_weight"),
+                "logp": payload.get("logp"),
+                "qed_score": payload.get("qed_score"),
+                "sa_score": payload.get("sa_score"),
+                "clinical_score": payload.get("clinical_score"),
+                "passes_lipinski": payload.get("passes_lipinski"),
+                "recommendation": payload.get("recommendation"),
+                "validation_status": "known_reference_scored",
+                "confidence_note": "Reference molecule shown because no fresh valid model-generated candidate set was available.",
+                "result_source": "known_reference_fallback",
+                "fallback_used": True,
+            }
+        )
+    fallback_rows.sort(key=lambda row: float(row.get("clinical_score") or 0), reverse=True)
+    return fallback_rows[:count]
+
+
 def _generate_candidates_for_disease(disease: str, count: int) -> dict:
     """Shared generation logic used by both REST and chat endpoints."""
     disease = disease.lower()
@@ -130,16 +216,75 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
 
     count = min(count, 200)
     rows = _load_csv(disease)
+    source_type = "precomputed_ranked_candidates"
+    generation_status = "fallback_to_precomputed_valid_candidates"
+    fallback_used = True
+    confidence_note = (
+        "Low confidence for fresh generation: the current product path is returning previously scored valid molecules "
+        "instead of claiming a new valid model-generated candidate run."
+    )
+    limitations = [
+        "These molecules come from previously scored valid outputs rather than a fresh trustworthy generation pass.",
+        "Current generation quality remains limited, so this response is intended for research support and demo safety.",
+    ]
+    recommended_next_step = "Use the scoring, comparison, and explanation tools on known valid molecules before treating generation as reliable."
+
     if not rows:
-        raise HTTPException(
-            status_code=503,
-            detail=f"No pre-computed candidates for '{disease}'. "
-                   "Run: python src/run_pipeline.py first."
-        )
+        db_rows = _load_db_top(count)
+        if db_rows:
+            rows = db_rows
+            source_type = "database_ranked_candidates"
+            generation_status = "fallback_to_previously_scored_molecules"
+            confidence_note = (
+                "No fresh valid candidate set was available, so the API is returning previously scored molecules from the local database."
+            )
+            limitations = [
+                "This is a fallback to stored scored molecules, not a fresh generation success.",
+                "Current generative quality remains unreliable, so treat this as an exploratory ranking view.",
+            ]
+        else:
+            rows = _fallback_reference_candidates(disease, count)
+            source_type = "known_reference_fallback"
+            generation_status = "fallback_to_known_reference_molecules" if rows else "no_valid_candidates_available"
+            confidence_note = (
+                "No valid model-generated candidate was produced in the active path, so the API is falling back to scored known reference molecules."
+                if rows else
+                "No valid model-generated candidate was available, and no safe fallback molecule set was found for this request."
+            )
+            limitations = [
+                "No fresh valid model-generated candidates were available for this request.",
+                "Known references are shown only as safe comparators and not as newly discovered molecules.",
+            ] if rows else [
+                "The current generator could not provide a trustworthy valid candidate set.",
+                "No safe fallback molecule list was available for this disease bucket in the current workspace.",
+            ]
+            recommended_next_step = (
+                "Score a known SMILES string or compare known molecules while generation quality is being improved."
+            )
+
+    if not rows:
+        return {
+            "disease": disease,
+            "count_returned": 0,
+            "count_requested": count,
+            "generated_at": datetime.now().isoformat(),
+            "generation_status": generation_status,
+            "message": "No valid candidate was produced in this run. The API is returning an honest empty result instead of inventing a molecule.",
+            "molecules": [],
+            "trust": _trust_block(
+                validation_status="no_valid_candidate_available",
+                confidence_note=confidence_note,
+                result_source=source_type,
+                fallback_used=False,
+                limitations=limitations,
+                recommended_next_step=recommended_next_step,
+            ),
+        }
 
     top = rows[:count]
     results = []
     for i, row in enumerate(top, 1):
+        score_value = _safe_float(row.get("clinical_score"))
         results.append({
             "rank":             i,
             "smiles":           row.get("smiles", ""),
@@ -147,9 +292,13 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
             "logp":             _safe_float(row.get("logp")),
             "qed_score":        _safe_float(row.get("qed_score")),
             "sa_score":         _safe_float(row.get("sa_score")),
-            "clinical_score":   _safe_float(row.get("clinical_score")),
+            "clinical_score":   score_value,
             "passes_lipinski":  str(row.get("passes_lipinski", "")).lower() in ("true", "1", "yes"),
-            "recommendation":   row.get("recommendation", ""),
+            "recommendation":   _ranking_label(score_value, row.get("recommendation")),
+            "validation_status": row.get("validation_status", "previously_scored_valid_smiles"),
+            "confidence_note": row.get("confidence_note", confidence_note),
+            "result_source": row.get("result_source", source_type),
+            "fallback_used": bool(row.get("fallback_used", fallback_used)),
         })
 
     return {
@@ -157,6 +306,20 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
         "count_returned":   len(results),
         "count_requested":  count,
         "generated_at":     datetime.now().isoformat(),
+        "generation_status": generation_status,
+        "message": (
+            "Showing the top available valid molecules from a safe fallback path because fresh generation quality is currently limited."
+            if fallback_used else
+            "Showing the top available molecules for this request."
+        ),
+        "trust": _trust_block(
+            validation_status="computational_valid_smiles_from_safe_fallback",
+            confidence_note=confidence_note,
+            result_source=source_type,
+            fallback_used=fallback_used,
+            limitations=limitations,
+            recommended_next_step=recommended_next_step,
+        ),
         "molecules":        results,
     }
 
@@ -186,12 +349,7 @@ def _score_smiles_payload(smiles: str) -> dict:
         lip = viol == 0
         score_val = genorova_clinical_score(smiles)
 
-        if score_val >= 0.85:
-            recommendation = "Strong candidate"
-        elif score_val >= 0.60:
-            recommendation = "Borderline"
-        else:
-            recommendation = "Reject"
+        recommendation = _ranking_label(score_val)
 
         _store_molecule(smiles, qed, sa, mw, logp, score_val, recommendation)
 
@@ -211,6 +369,17 @@ def _score_smiles_payload(smiles: str) -> dict:
             "rotatable_bonds": rotatable_bonds,
             "ring_count": rings,
             "fraction_csp3": round(fraction_csp3, 3),
+            "validation_status": "computational_property_prediction",
+            "confidence_note": (
+                "This is a computational property and ranking estimate for a valid SMILES string, not experimental validation."
+            ),
+            "limitations": [
+                "The score reflects the current Genorova ranking logic rather than clinical proof.",
+                "Biological activity, safety, and efficacy remain uncertain until experimentally tested.",
+            ],
+            "recommended_next_step": "Compare this molecule with known references and run orthogonal computational or experimental follow-up.",
+            "result_source": "direct_smiles_scoring",
+            "fallback_used": False,
             "scored_at": datetime.now().isoformat(),
         }
 
@@ -291,29 +460,33 @@ def health():
         except Exception:
             pass
 
+    stats = api_stats()
     return {
         "status":          "running",
         "model":           "Genorova AI v1.0",
+        "prototype_status": PROTOTYPE_STATUS,
         "timestamp":       datetime.now().isoformat(),
         "models_loaded": {
             "diabetes":  diabetes_model,
             "infection": infection_model,
         },
         "molecules_in_db": db_count,
-        "best_molecule":   "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2",
-        "best_score":      0.9649,
+        "best_molecule":   stats.get("best_molecule"),
+        "best_score":      stats.get("best_score"),
+        "trust_note":      "Operational status only. All molecule outputs are computational research-support results and not experimentally validated.",
     }
 
 
 # ── ENDPOINT: POST /generate ──────────────────────────────────────────────────
 
-@app.post("/generate", summary="Generate drug candidates")
+@app.post("/generate", summary="Return ranked computational molecule results")
 def generate(req: GenerateRequest):
     """
-    Generate new drug molecule candidates for a target disease.
+    Return ranked computational molecule results for a target disease.
 
-    Uses the trained VAE + library screening to return top scored candidates.
-    Falls back to the pre-computed CSV if the model is not loaded in memory.
+    The active product flow favors honesty over forcing a fresh generation claim:
+    it returns previously scored valid molecules, known reference fallbacks, or an
+    explicit empty result when no trustworthy candidate set is available.
 
     - **disease**: "diabetes" or "infection"
     - **count**: number of molecules to return (max 200)
@@ -321,7 +494,7 @@ def generate(req: GenerateRequest):
     return _generate_candidates_for_disease(req.disease, req.count)
 
 
-@app.post("/api/generate", summary="Generate drug candidates (SaaS API)")
+@app.post("/api/generate", summary="Return ranked computational molecules (SaaS API)")
 def api_generate(req: GenerateRequest):
     """Alias route for the SaaS frontend deployed against src.api:app."""
     return generate(req)
@@ -329,15 +502,15 @@ def api_generate(req: GenerateRequest):
 
 # ── ENDPOINT: POST /score ─────────────────────────────────────────────────────
 
-@app.post("/score", summary="Score a molecule")
+@app.post("/score", summary="Score a molecule with computational property estimates")
 def score(req: ScoreRequest):
     """
-    Compute the Genorova Clinical Score for any valid SMILES string.
+    Compute Genorova's current computational score for any valid SMILES string.
 
     Returns a complete property profile including:
     - Drug-likeness (QED), synthetic accessibility (SA), Lipinski compliance
-    - Genorova clinical score (0–1)
-    - Recommendation: Strong candidate / Borderline / Reject
+    - Genorova model score (0–1)
+    - A model-ranked prioritization label suitable for exploratory research only
     """
     return _score_smiles_payload(req.smiles)
 
@@ -353,7 +526,7 @@ def api_score(req: ScoreRequest):
 @app.get("/best_molecules", summary="Top 10 molecules discovered")
 def best_molecules(n: int = 10):
     """
-    Return the top N molecules discovered by Genorova AI, ranked by clinical score.
+    Return the top N computationally ranked molecules currently available to the platform.
 
     Queries the persistent molecule database that is updated every pipeline run.
     """
@@ -383,6 +556,7 @@ def best_molecules(n: int = 10):
 
     return {
         "source":    "database",
+        "prototype_status": PROTOTYPE_STATUS,
         "count":     len(rows),
         "molecules": [
             {
@@ -392,7 +566,7 @@ def best_molecules(n: int = 10):
                 "qed_score":      r.get("qed_score", 0),
                 "sa_score":       r.get("sa_score", 0),
                 "target_disease": r.get("target_disease", ""),
-                "recommendation": r.get("recommendation", ""),
+                "recommendation": _ranking_label(r.get("clinical_score", 0), r.get("recommendation", "")),
             }
             for i, r in enumerate(rows)
         ],
@@ -479,6 +653,7 @@ def api_stats():
             "avg_qed_score":      None,
             "avg_sa_score":       None,
             "data_source":        "none",
+            "prototype_status":   PROTOTYPE_STATUS,
             "message": (
                 "No molecules generated yet. "
                 "Run: python src/run_pipeline.py to generate candidates."
@@ -493,6 +668,8 @@ def api_stats():
         "avg_qed_score":         avg_qed,
         "avg_sa_score":          avg_sa,
         "data_source":           data_source,
+        "prototype_status":      PROTOTYPE_STATUS,
+        "trust_note":            "Metrics describe computationally ranked molecules and are not experimental validation.",
     }
 
 
@@ -731,6 +908,27 @@ def _build_summary(mode: str, intent: str, target_label: str, score_payload: dic
     )
 
 
+def _build_generation_fallback_summary(target_label: str, generated: dict[str, Any]) -> str:
+    """Explain the current safe generation fallback behavior in plain language."""
+    trust = generated.get("trust", {})
+    count_returned = generated.get("count_returned", 0)
+    if count_returned == 0:
+        return (
+            f"No valid model-generated candidate was available for {target_label} in this run. "
+            "Genorova is returning an honest empty result rather than inventing a molecule."
+        )
+    source = trust.get("result_source", "safe_fallback")
+    if source == "known_reference_fallback":
+        return (
+            f"Fresh generation confidence is low for {target_label}, so Genorova is showing scored known reference molecules "
+            "as a safer fallback for comparison and explanation."
+        )
+    return (
+        f"Fresh generation confidence is currently limited for {target_label}, so Genorova is showing previously scored valid molecules "
+        "instead of claiming a new trustworthy candidate run."
+    )
+
+
 def _mode_specific_why(mode: str, score_payload: dict, target_label: str) -> str:
     """Explain why a molecule was selected in the requested detail mode."""
     mw = score_payload.get("molecular_weight", 0.0)
@@ -764,6 +962,10 @@ def _candidate_block(score_payload: dict, label: str | None = None) -> dict:
         "score": score_payload.get("clinical_score"),
         "recommendation": score_payload.get("recommendation"),
         "molecule_svg": _molecule_svg(score_payload.get("smiles")),
+        "validation_status": score_payload.get("validation_status"),
+        "confidence_note": score_payload.get("confidence_note"),
+        "result_source": score_payload.get("result_source"),
+        "fallback_used": score_payload.get("fallback_used", False),
     }
 
 
@@ -856,6 +1058,18 @@ def _warnings_block() -> list[str]:
         "The result is hypothesis-generating and not experimentally validated.",
         "Do not interpret this as a proven drug, safe therapy, or clinical recommendation.",
     ]
+
+
+def _trust_payload(score_payload: dict) -> dict[str, Any]:
+    """Expose consistent trust metadata for chat cards."""
+    return _trust_block(
+        validation_status=score_payload.get("validation_status", "computational_prediction_only"),
+        confidence_note=score_payload.get("confidence_note", "Confidence is limited because this is a computational prediction."),
+        result_source=score_payload.get("result_source", "chat_scoring"),
+        fallback_used=score_payload.get("fallback_used", False),
+        limitations=score_payload.get("limitations"),
+        recommended_next_step=score_payload.get("recommended_next_step"),
+    )
 
 
 def _generated_candidates_with_visuals(molecules: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -958,8 +1172,10 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             "chemical_properties": _chemical_properties(score_payload),
             "physical_properties": _physical_properties(score_payload),
             "pharmacology": _pharmacology_block(score_payload, target_label),
+            "trust": _trust_payload(score_payload),
             "strengths": _strengths_block(score_payload),
             "risks": _risks_block(score_payload),
+            "limitations": score_payload.get("limitations", []),
             "next_steps": _next_steps_block(intent),
             "warnings": _warnings_block(),
             "follow_up_actions": _follow_up_actions(candidate_smiles),
@@ -985,8 +1201,10 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             "chemical_properties": _chemical_properties(score_payload),
             "physical_properties": _physical_properties(score_payload),
             "pharmacology": _pharmacology_block(score_payload, target_label),
+            "trust": _trust_payload(score_payload),
             "strengths": _strengths_block(score_payload),
             "risks": _risks_block(score_payload),
+            "limitations": score_payload.get("limitations", []),
             "next_steps": _next_steps_block(intent),
             "warnings": _warnings_block(),
             "follow_up_actions": _follow_up_actions(candidate_smiles),
@@ -1022,8 +1240,10 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             "chemical_properties": _chemical_properties(preferred),
             "physical_properties": _physical_properties(preferred),
             "pharmacology": _pharmacology_block(preferred, target_label),
+            "trust": _trust_payload(preferred),
             "strengths": _strengths_block(preferred),
             "risks": _risks_block(preferred),
+            "limitations": preferred.get("limitations", []),
             "next_steps": _next_steps_block(intent),
             "warnings": _warnings_block(),
             "follow_up_actions": _follow_up_actions(candidate_smiles),
@@ -1063,8 +1283,10 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             "chemical_properties": _chemical_properties(base_candidate),
             "physical_properties": _physical_properties(base_candidate),
             "pharmacology": _pharmacology_block(base_candidate, target_label),
+            "trust": _trust_payload(base_candidate),
             "strengths": _strengths_block(base_candidate),
             "risks": _risks_block(base_candidate),
+            "limitations": base_candidate.get("limitations", []),
             "optimization_suggestions": optimization_suggestions,
             "next_steps": _next_steps_block(intent),
             "warnings": _warnings_block(),
@@ -1078,22 +1300,79 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         }
 
     generated = _generate_candidates_for_disease(target_bucket, _extract_count(message, default=5))
+    if generated.get("count_returned", 0) == 0:
+        trust = generated.get("trust", _trust_block(
+            validation_status="no_valid_candidate_available",
+            confidence_note="No valid candidate was available in this run.",
+            result_source="empty_generation_result",
+        ))
+        return {
+            "intent": "generate",
+            "mode": mode,
+            "message": message,
+            "summary": _build_generation_fallback_summary(target_label, generated),
+            "candidate": None,
+            "generated_candidates": [],
+            "trust": trust,
+            "limitations": trust.get("limitations", []),
+            "why": "The current generation path did not produce a trustworthy valid molecule, so Genorova is explicitly reporting the failure.",
+            "risks": [
+                "Generation quality is currently too weak to present a fresh molecule as a valid candidate.",
+                "Proceeding without a valid structure would be misleading.",
+            ],
+            "next_steps": [
+                trust.get("recommended_next_step", "Score a known molecule instead."),
+                "Use the score, explain, or compare flows on known valid SMILES strings.",
+                "Review checkpoint comparison results before trusting new generation runs.",
+            ],
+            "warnings": _warnings_block(),
+            "follow_up_actions": [
+                {"label": "Score Known Molecule", "prompt": 'Score this molecule: CCO'},
+                {"label": "Compare References", "prompt": "Compare metformin with the best one"},
+                {"label": "Explain Best Molecule", "prompt": "Explain the best molecule simply"},
+            ],
+            "program_context": {
+                "requested_label": target_label,
+                "supported_bucket": target_bucket,
+                "count_returned": 0,
+                "generation_status": generated.get("generation_status"),
+            },
+            "conversation_state": _build_conversation_state(
+                intent="generate",
+                mode=mode,
+                target_label=target_label,
+                candidate_smiles=None,
+            ),
+        }
+
     top_candidate = generated["molecules"][0]
     score_payload = _score_smiles_payload(top_candidate["smiles"])
+    score_payload.update(
+        {
+            "validation_status": generated.get("trust", {}).get("validation_status", score_payload.get("validation_status")),
+            "confidence_note": generated.get("trust", {}).get("confidence_note", score_payload.get("confidence_note")),
+            "result_source": generated.get("trust", {}).get("result_source", score_payload.get("result_source")),
+            "fallback_used": generated.get("trust", {}).get("fallback_used", False),
+            "limitations": generated.get("trust", {}).get("limitations", score_payload.get("limitations")),
+            "recommended_next_step": generated.get("trust", {}).get("recommended_next_step", score_payload.get("recommended_next_step")),
+        }
+    )
     candidate_smiles = score_payload.get("smiles")
     return {
         "intent": "generate",
         "mode": mode,
         "message": message,
-        "summary": _build_summary(mode, "generation", target_label, score_payload),
-        "candidate": _candidate_block(score_payload),
+        "summary": _build_generation_fallback_summary(target_label, generated),
+        "candidate": _candidate_block(score_payload, label="Top safe fallback molecule"),
         "generated_candidates": _generated_candidates_with_visuals(generated["molecules"]),
         "why": _mode_specific_why(mode, score_payload, target_label),
         "chemical_properties": _chemical_properties(score_payload),
         "physical_properties": _physical_properties(score_payload),
         "pharmacology": _pharmacology_block(score_payload, target_label),
+        "trust": _trust_payload(score_payload),
         "strengths": _strengths_block(score_payload),
         "risks": _risks_block(score_payload),
+        "limitations": score_payload.get("limitations", []),
         "next_steps": _next_steps_block(intent),
         "warnings": _warnings_block(),
         "follow_up_actions": _follow_up_actions(candidate_smiles),
@@ -1101,6 +1380,8 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             "requested_label": target_label,
             "supported_bucket": target_bucket,
             "count_returned": generated["count_returned"],
+            "generation_status": generated.get("generation_status"),
+            "source_type": generated.get("trust", {}).get("result_source"),
         },
         "conversation_state": _build_conversation_state(
             intent="generate",
@@ -1129,11 +1410,12 @@ def _frontend_file(path: str) -> Path | None:
 def _api_home_payload() -> dict:
     """Stable metadata payload for the API surface."""
     return {
-        "name":    "Genorova AI Drug Discovery API",
+        "name":    "Genorova AI Computational Molecule Analysis API",
         "version": "1.0.0",
         "docs":    "/docs",
         "health":  "/health",
         "report":  "/report",
+        "prototype_status": PROTOTYPE_STATUS,
     }
 
 

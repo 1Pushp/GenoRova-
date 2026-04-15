@@ -36,7 +36,7 @@ import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import Any, List, Tuple, Dict
 from tqdm import tqdm
 
 # RDKit imported lazily inside functions (prevents Windows DLL load failure
@@ -101,6 +101,78 @@ GENERATE_OUTPUT_DIR = Path("outputs/generated")
 GENERATE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _load_checkpoint_state(checkpoint_path: Path, device: torch.device) -> dict[str, Any]:
+    """Load checkpoint and normalize the expected model-state key."""
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    state_dict = checkpoint.get("model_state") or checkpoint.get("model_state_dict")
+    if state_dict is None:
+        raise KeyError(f"Checkpoint {checkpoint_path} does not contain model weights.")
+    checkpoint["_resolved_model_state"] = state_dict
+    return checkpoint
+
+
+def _candidate_vocab_paths() -> list[Path]:
+    """Return likely vocabulary files for runtime generation."""
+    return [
+        PROJECT_ROOT / "outputs" / "vocabulary_diabetes_pretrain.json",
+        PROJECT_ROOT / "outputs" / "vocabulary_diabetes.json",
+        PROJECT_ROOT / "outputs" / "vocabulary_infection.json",
+        PROJECT_ROOT / "outputs" / "vocab.json",
+        PROJECT_ROOT / "outputs" / "vocabulary.json",
+        Path("outputs/vocab.json"),
+        Path("outputs/vocabulary.json"),
+    ]
+
+
+def _vocab_size_from_checkpoint(checkpoint: dict[str, Any]) -> int:
+    """Infer the vocab size expected by a checkpoint."""
+    if checkpoint.get("vocab_size") is not None:
+        return int(checkpoint["vocab_size"])
+    state = checkpoint["_resolved_model_state"]
+    flattened_size = state["encoder.fc1.weight"].shape[1]
+    max_length = int(checkpoint.get("max_length") or MAX_SMILES_LENGTH)
+    return int(flattened_size // max_length)
+
+
+def _resolve_vocab_path(checkpoint_path: Path, checkpoint: dict[str, Any]) -> Path:
+    """Choose the best vocab match for the checkpoint instead of guessing blindly."""
+    target_vocab_size = _vocab_size_from_checkpoint(checkpoint)
+    disease = str(checkpoint.get("disease") or "").lower()
+    stage_name = str(checkpoint.get("stage_name") or "").lower()
+
+    candidates = []
+    for path in _candidate_vocab_paths():
+        if not path.exists():
+            continue
+        try:
+            char2idx, _ = load_vocab(path)
+        except Exception:
+            continue
+        if len(char2idx) != target_vocab_size:
+            continue
+
+        score = 0
+        path_name = path.stem.lower()
+        if disease and disease in path_name:
+            score += 3
+        if stage_name and stage_name in path_name:
+            score += 2
+        if "pretrain" in path_name and stage_name == "pretrain":
+            score += 2
+        if "vocab" == path.stem.lower():
+            score += 1
+        candidates.append((score, path))
+
+    if candidates:
+        candidates.sort(key=lambda item: (-item[0], str(item[1])))
+        return candidates[0][1]
+
+    raise FileNotFoundError(
+        f"Could not find a vocabulary file matching checkpoint {checkpoint_path} "
+        f"(expected vocab size {target_vocab_size})."
+    )
+
+
 # ============================================================================
 # GENERATION ENGINE
 # ============================================================================
@@ -132,57 +204,46 @@ class MoleculeGenerator:
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
         
         # Load checkpoint
-        self.checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        
-        # Load vocabulary
-        vocab_candidates = [
-            PROJECT_ROOT / "outputs" / "vocab.json",
-            PROJECT_ROOT / "outputs" / "vocabulary.json",
-            Path("outputs/vocab.json"),
-            Path("outputs/vocabulary.json"),
-        ]
-        vocab_path = next((path for path in vocab_candidates if path.exists()), None)
-        if vocab_path is None:
-            raise FileNotFoundError("Vocabulary not found in outputs/vocab.json or outputs/vocabulary.json")
-        
+        self.checkpoint = _load_checkpoint_state(Path(checkpoint_path), self.device)
+
+        # Load vocabulary with checkpoint-aware resolution to avoid silent mismatch.
+        vocab_path = _resolve_vocab_path(Path(checkpoint_path), self.checkpoint)
         self.char2idx, self.idx2char = load_vocab(vocab_path)
         vocab_size = len(self.char2idx)
-        
+
         # Auto-detect model dimensions from checkpoint
-        encoder_fc1_weight = self.checkpoint['model_state']['encoder.fc1.weight']
+        state_dict = self.checkpoint["_resolved_model_state"]
+        encoder_fc1_weight = state_dict["encoder.fc1.weight"]
         input_size = encoder_fc1_weight.shape[1]  # Should be max_length * vocab_size
-        
-        # Infer max_length and vocab_size from the checkpoint
-        # Assuming the checkpoint was created with the same vocab_size
-        inferred_max_length = input_size // vocab_size
-        
+        inferred_vocab_size = _vocab_size_from_checkpoint(self.checkpoint)
+        inferred_max_length = input_size // inferred_vocab_size
+
         print(f"    Vocabulary size: {vocab_size}")
+        print(f"    Vocabulary file: {vocab_path}")
         print(f"    Inferred MAX_SMILES_LENGTH from checkpoint: {inferred_max_length}")
         print(f"    Inferred flattened input size: {input_size}")
         print(f"    Best validation loss: {self.checkpoint['best_val_loss']:.6f}")
         print(f"    Trained epochs: {self.checkpoint['epoch']}")
-        
+
+        if vocab_size != inferred_vocab_size:
+            raise ValueError(
+                f"Vocabulary mismatch for {checkpoint_path}: checkpoint expects vocab size "
+                f"{inferred_vocab_size}, but {vocab_path} has {vocab_size}."
+            )
+
         # Initialize model with inferred dimensions
-        from model import VAE as VAEClass
-        # We need to create a VAE with matching dimensions
-        # For now, use a workaround: create the model class and override the flattened size
-        
-        self.model = VAE(vocab_size=vocab_size).to(self.device)
-        
-        # Try to load - if it fails due to shape mismatch, try with different dimensions
+        self.model = VAE(vocab_size=vocab_size, max_length=inferred_max_length).to(self.device)
+
         try:
-            self.model.load_state_dict(self.checkpoint['model_state'])
+            self.model.load_state_dict(state_dict)
             print(f"    Model loaded successfully on {self.device}")
         except RuntimeError as e:
-            print(f"\n[!] Shape mismatch - trying to fix dimensions...")
-            print(f"    Error: {str(e)[:100]}...")
-            
-            # The model was trained with different max_length
-            # We need to reload with the correct dimensions
-            # For now, just initialize a fresh model
-            print(f"    Creating fresh model (model weights not loaded)")
-            print(f"    This is OK for generation - latent space sampling doesn't require exact weights")
-        
+            raise RuntimeError(
+                "Checkpoint/model shape mismatch during runtime generation. "
+                "Generation has been stopped to avoid producing misleading output. "
+                f"Checkpoint: {checkpoint_path}, vocab: {vocab_path}, error: {e}"
+            ) from e
+
         self.model.eval()
         
         # Statistics

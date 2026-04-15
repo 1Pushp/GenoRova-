@@ -6,16 +6,16 @@ const API_PREFIX = API_BASE_URL ? `${API_BASE_URL}/api` : "/api";
 const STORAGE_KEY = "genorova-chat-v11-session";
 
 const defaultStats = {
-  total_molecules: 100,
-  best_score: 0.9649,
-  best_molecule: "COc1cc2c(cc1OC)C(C)N(S(N)(=O)=O)CC2",
-  best_molecular_weight: 286,
-  best_docking_affinity: -5.041,
-  best_ca7_ki: "6.4 nM",
+  total_molecules: 0,
+  best_score: null,
+  best_molecule: null,
+  best_molecular_weight: null,
+  prototype_status: "prototype_research_support",
+  trust_note: "Computational research-support platform. Experimental validation is not included.",
 };
 
 const starterPrompts = [
-  "Generate a drug candidate for tuberculosis",
+  "Show the top computational candidates for tuberculosis",
   "Score this molecule: CCO",
   "Explain this molecule simply",
   "Compare it with the best one",
@@ -184,9 +184,14 @@ function CandidateHero({ candidate }) {
             </div>
             <div className="rounded-2xl bg-white/90 p-4">
               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Status</div>
-              <div className="mt-2 text-sm font-semibold text-slate-900">{formatValue(candidate.recommendation)}</div>
+              <div className="mt-2 text-sm font-semibold text-slate-900">{formatValue(candidate.validation_status || candidate.recommendation)}</div>
             </div>
           </div>
+          {candidate.confidence_note ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              {candidate.confidence_note}
+            </div>
+          ) : null}
         </div>
         <MoleculeVisual svg={candidate.molecule_svg} smiles={candidate.smiles} />
       </div>
@@ -210,7 +215,7 @@ function ComparisonSection({ comparison }) {
               <MoleculeVisual svg={molecule.molecule_svg} smiles={molecule.smiles} compact />
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-700">
-              <div>Clinical: {formatValue(molecule.clinical_score)}</div>
+              <div>Model score: {formatValue(molecule.clinical_score)}</div>
               <div>QED: {formatValue(molecule.qed_score)}</div>
               <div>LogP: {formatValue(molecule.logp)}</div>
               <div>MW: {formatValue(molecule.molecular_weight)}</div>
@@ -230,7 +235,7 @@ function GeneratedCandidatesSection({ molecules }) {
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Generated Candidates</div>
+        <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Ranked Molecules</div>
         <div className="text-xs text-slate-500">{molecules.length} returned</div>
       </div>
       <div className="mt-4 grid gap-4">
@@ -246,11 +251,16 @@ function GeneratedCandidatesSection({ molecules }) {
                   </div>
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-4 text-sm text-slate-700">
-                  <div>Score: {formatValue(molecule.clinical_score)}</div>
+                  <div>Model score: {formatValue(molecule.clinical_score)}</div>
                   <div>MW: {formatValue(molecule.molecular_weight)}</div>
                   <div>LogP: {formatValue(molecule.logp)}</div>
                   <div>QED: {formatValue(molecule.qed_score)}</div>
                 </div>
+                {molecule.confidence_note ? (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {molecule.confidence_note}
+                  </div>
+                ) : null}
                 <div className="mt-4 flex flex-wrap gap-2">
                   <CopyButton value={molecule.smiles} />
                 </div>
@@ -318,6 +328,7 @@ function AssistantCard({ payload, onFollowUp }) {
           </section>
         ) : null}
         <QuickActions actions={payload.follow_up_actions} onPrompt={onFollowUp} />
+        <PropertySection title="Trust & Validation" data={payload.trust} />
         <PropertySection title="Chemical Properties" data={payload.chemical_properties} />
         <PropertySection title="Physical Properties" data={payload.physical_properties} />
         <PropertySection title="Pharmacological Profile" data={payload.pharmacology} />
@@ -325,6 +336,7 @@ function AssistantCard({ payload, onFollowUp }) {
         <GeneratedCandidatesSection molecules={payload.generated_candidates} />
         <ListSection title="Strengths" items={payload.strengths} />
         <ListSection title="Risks / Warnings" items={payload.risks} tone="warn" />
+        <ListSection title="Limitations" items={payload.limitations} tone="warn" />
         <ListSection title="Optimization Suggestions" items={payload.optimization_suggestions} />
         <ListSection title="Recommended Next Steps" items={payload.next_steps} />
         <ListSection title="Scientific Responsibility" items={payload.warnings} tone="danger" />
@@ -340,11 +352,11 @@ function EmptyState({ stats, onPromptClick }) {
         Genorova Chat v1.1
       </div>
       <h1 className="mt-8 max-w-4xl text-4xl font-semibold tracking-tight text-slate-900 sm:text-6xl">
-        Persistent, visual, conversational drug discovery support.
+        Persistent, visual, conversational molecular analysis support.
       </h1>
       <p className="mt-5 max-w-3xl text-base leading-8 text-slate-600 sm:text-lg">
-        Genorova now keeps session context, shows molecule structures inline, and supports premium follow-up flows
-        for research teams, students, and non-technical users.
+        Genorova keeps session context, shows molecule structures inline, and helps teams score, explain, and compare
+        computational results with explicit scientific caveats.
       </p>
 
       <div className="mt-10 grid w-full gap-4 sm:grid-cols-3">
@@ -361,8 +373,13 @@ function EmptyState({ stats, onPromptClick }) {
         <div className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-sm">
           <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Current Dataset</div>
           <div className="mt-3 text-3xl font-semibold text-slate-900">{formatValue(stats.total_molecules)}</div>
-          <div className="mt-2 text-sm text-slate-600">model-ranked molecules currently available in the deployed platform</div>
+          <div className="mt-2 text-sm text-slate-600">previously scored valid molecules currently available in the deployed platform</div>
         </div>
+      </div>
+
+      <div className="mt-8 rounded-[28px] border border-amber-200 bg-amber-50 px-6 py-5 text-left text-sm leading-7 text-amber-900">
+        Generation quality is still limited in the current prototype. For demos, Genorova is most reliable for
+        scoring, explanation, comparison, and reviewing previously scored valid molecules.
       </div>
 
       <div className="mt-10 grid w-full gap-3">
@@ -503,7 +520,7 @@ export default function GenorovaChatAppV11() {
               <div className="text-xs font-bold uppercase tracking-[0.32em] text-teal-300">Genorova</div>
               <div className="mt-3 text-3xl font-semibold tracking-tight text-white">Chat v1.1</div>
               <div className="mt-3 max-w-xs text-sm leading-6 text-slate-300">
-                Session-aware molecule discovery with visual structures, follow-up actions, and responsible scientific framing.
+                Session-aware molecular analysis with visual structures, follow-up actions, and explicit scientific limitations.
               </div>
             </div>
             <div className="flex gap-2">
@@ -563,7 +580,7 @@ export default function GenorovaChatAppV11() {
               <div>
                 <div className="text-xs font-bold uppercase tracking-[0.28em] text-teal-700">Genorova Chat</div>
                 <div className="mt-2 text-2xl font-semibold text-slate-900">
-                  Conversational drug discovery with session memory
+                  Conversational molecular analysis with session memory
                 </div>
               </div>
               <div className="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
@@ -610,7 +627,7 @@ export default function GenorovaChatAppV11() {
                             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-teal-400 [animation-delay:120ms]" />
                             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-teal-300 [animation-delay:240ms]" />
                           </span>
-                          Genorova is using the current session context, reviewing the latest molecule, and assembling a structured response.
+                          Genorova is using the current session context, reviewing the latest molecule, and assembling a conservative research-support response.
                         </div>
                       </div>
                     </div>
@@ -636,7 +653,7 @@ export default function GenorovaChatAppV11() {
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Ask Genorova in plain English. Follow-ups like “make it safer” and “compare it with the best one” now use session memory."
+                  placeholder="Ask Genorova in plain English. Try scoring, explaining, or comparing known molecules while generation quality is still limited."
                   className="w-full resize-none rounded-[24px] border-0 bg-transparent px-3 py-3 text-sm leading-7 text-slate-900 outline-none placeholder:text-slate-400"
                 />
                 <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -662,7 +679,7 @@ export default function GenorovaChatAppV11() {
                 </div>
               </form>
               <div className="mt-3 text-center text-xs leading-5 text-slate-500">
-                Genorova outputs are computational predictions for research support only and are not experimentally validated.
+                Genorova outputs are computational research-support results only, with limited confidence and no experimental validation.
               </div>
             </div>
           </footer>

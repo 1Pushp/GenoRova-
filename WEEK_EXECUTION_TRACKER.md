@@ -28,3 +28,30 @@ Issues:
 Next:
 - Run the evaluator against additional checkpoints and compare validity/uniqueness/novelty before trusting any generation demo.
 - Use the new evaluation outputs in future readiness reports instead of relying on training loss alone.
+
+## Day 5
+Done:
+- Extended `evaluate_generation.py` to compare multiple checkpoints in one run and save ranking artifacts (`checkpoint_comparison.csv`, `checkpoint_metrics.json`, `checkpoint_ranking.md`).
+- Added debug artifacts for failed generation runs, including raw decoded strings, token-id traces, invalid-reason counts, and top decoded token summaries.
+- Fixed checkpoint/vocab resolution so evaluation matches vocab files to checkpoint metadata instead of relying on brittle filename heuristics.
+
+Issues:
+- The seeded Day 5 checkpoint comparison still shows 0% RDKit-valid molecules across the evaluated diabetes checkpoints in `day5_checkpoint_compare_seed42`.
+- The older `genorova_diabetes_best.pt` can occasionally produce a rare valid molecule when paired with the correct 39-token vocab, but the result is unstable and not production-usable.
+
+Next:
+- Fix sequence-generation quality at the model/decoding level before trusting any generation ranking based on sparse accidental valid outputs.
+- Prioritize BOS/EOS-aware decoding or a more generation-stable sequence objective over further UI work.
+
+## Day 6
+Done:
+- Added safer trust messaging across the active API and frontend so outputs are framed as prototype computational research-support results rather than validated drug discoveries.
+- Implemented explicit fallback behavior in the product flow so weak generation returns honest fallback molecules or an empty result instead of implying a fresh valid candidate.
+- Hardened runtime checkpoint/vocab handling in `genorova/src/generate.py` to resolve vocab files by checkpoint metadata and stop on incompatibility instead of silently generating from an unloaded model.
+
+Issues:
+- Day 5 generation-quality findings still stand: valid de novo generation remains weak, so demo value currently comes more from scoring and analysis than from fresh molecule generation.
+- Some legacy UI copy and internal field names still use `clinical_score` for compatibility even though the user-facing wording now presents it as a model score.
+
+Next:
+- Add BOS/EOS-aware sequence handling and generation-time validity checks before treating fresh generation as a trustworthy product capability.
