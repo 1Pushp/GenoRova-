@@ -14,3 +14,17 @@ Issues:
 Next:
 - Consider fixing the scheduler-step ordering warning in `genorova/src/train.py`.
 - Expand coverage around persistence/report generation only after the active Day 3 baseline stays stable.
+
+## Day 4
+Done:
+- Added `genorova/src/evaluate_generation.py` to evaluate generated batches with RDKit validity, uniqueness, novelty, property summaries, and active scoring summaries.
+- Added reusable output artifacts for generation evaluation: `generated_molecules.csv`, `evaluation_metrics.json`, and `evaluation_summary.md`.
+- Updated the root README with commands for running generation evaluation on the current checkpoint/vocabulary setup.
+
+Issues:
+- A real verification run against `genorova/outputs/models/diabetes/genorova_diabetes_pretrain_best.pt` produced 0% RDKit-valid molecules in the sampled batch, which is an important model-quality warning.
+- Scoring summaries depend on valid RDKit molecules; when validity is 0, the score section is necessarily empty.
+
+Next:
+- Run the evaluator against additional checkpoints and compare validity/uniqueness/novelty before trusting any generation demo.
+- Use the new evaluation outputs in future readiness reports instead of relying on training loss alone.
