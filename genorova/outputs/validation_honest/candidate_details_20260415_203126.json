@@ -1,0 +1,392 @@
+[
+  {
+    "smiles": "CCCCcc(ccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.924198"
+  },
+  {
+    "smiles": "CCCCcc(cccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.926198"
+  },
+  {
+    "smiles": "CCCCcc(cccccccCcccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.930236"
+  },
+  {
+    "smiles": "CCCCcccccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.943763"
+  },
+  {
+    "smiles": "CCC1ccccccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.944524"
+  },
+  {
+    "smiles": "CCCCccccccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.945604"
+  },
+  {
+    "smiles": "CCCCcc(ccccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.947144"
+  },
+  {
+    "smiles": "CCCCcccccccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.948787"
+  },
+  {
+    "smiles": "CCCCcc(cccccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.950460"
+  },
+  {
+    "smiles": "CCCCccccccccccccccccccccccccc",
+    "validation_status": "FAIL",
+    "recommendation": "REJECT",
+    "layer_1_basic_chemistry": {
+      "valid_smiles": false,
+      "non_trivial": false,
+      "stable_chemistry": false
+    },
+    "layer_2_lipinski": {
+      "passes_rule": false,
+      "molecular_weight": null,
+      "logp": null,
+      "h_donors": null,
+      "h_acceptors": null,
+      "violations": []
+    },
+    "layer_3_drug_properties": {
+      "qed_score": null,
+      "sa_score": null,
+      "polar_surface_area": null,
+      "rotatable_bonds": null,
+      "warnings": []
+    },
+    "layer_4_clinical_score": {
+      "estimated_affinity_proxy": -4.0,
+      "real_docking_kcal_mol": null,
+      "binding_signal_source": "heuristic_proxy",
+      "binding_signal_status": "real_docking_not_run",
+      "binding_score": 0.0,
+      "toxicity_risk": "UNKNOWN",
+      "safety_score": 0.5,
+      "novelty_score": 0.5,
+      "clinical_score": 0.15
+    },
+    "red_flags": [],
+    "rationale": "Molecule scores 0.150 on clinical scale. Heuristic affinity proxy: -4.00 (not docking). Toxicity: UNKNOWN. Novelty: 0.50",
+    "generated_timestamp": "2026-04-15T20:31:25.952623"
+  }
+]

@@ -53,6 +53,7 @@ WINNING_BASELINE_REFERENCE_CSV = ROOT_DIR / "data" / "raw" / "diabetes_molecules
 DEFAULT_TOP_K = 5
 DEFAULT_REPETITION_PENALTY = 0.75
 DEFAULT_STRUCTURAL_GUARD_STRENGTH = 1.0
+DEFAULT_AR_MIN_GENERATION_LENGTH = 20
 
 DEFAULT_FILTERS = {
     "qed_min": 0.50,
@@ -126,22 +127,68 @@ def _vocab_size_from_checkpoint(checkpoint: dict[str, Any]) -> int:
     return int(flattened_size // max_length)
 
 
-def _candidate_vocab_paths() -> list[Path]:
-    return [
+def _candidate_vocab_paths(checkpoint_path: Path | None = None) -> list[Path]:
+    candidates = [
+        OUTPUT_DIR / "vocab_ar.json",
+        OUTPUT_DIR / "models" / "ar" / "vocab.json",
         OUTPUT_DIR / "vocabulary_diabetes_pretrain.json",
         OUTPUT_DIR / "vocabulary_diabetes.json",
         OUTPUT_DIR / "vocabulary_infection.json",
         OUTPUT_DIR / "vocab.json",
         OUTPUT_DIR / "vocabulary.json",
     ]
+    if checkpoint_path is not None:
+        candidates.extend(sorted(checkpoint_path.parent.glob("vocab*.json")))
+        candidates.extend(sorted(checkpoint_path.parent.parent.glob("vocab*.json")))
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _resolve_declared_vocab_path(checkpoint_path: Path, checkpoint: dict[str, Any]) -> Path | None:
+    declared_vocab = checkpoint.get("vocab_path")
+    if not declared_vocab:
+        return None
+
+    declared_path = Path(str(declared_vocab))
+    candidates = []
+    if declared_path.is_absolute():
+        candidates.append(declared_path)
+    candidates.append(checkpoint_path.parent / declared_path)
+    candidates.append(ROOT_DIR / declared_path)
+    candidates.append(OUTPUT_DIR / declared_path.name)
+
+    target_vocab_size = _vocab_size_from_checkpoint(checkpoint)
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            char2idx, _ = load_vocab(str(candidate))
+        except Exception:
+            continue
+        if len(char2idx) == target_vocab_size:
+            return candidate
+    return None
 
 
 def _resolve_default_vocab(checkpoint_path: Path) -> Path:
     checkpoint = _load_checkpoint_state(checkpoint_path)
+    declared_vocab = _resolve_declared_vocab_path(checkpoint_path, checkpoint)
+    if declared_vocab is not None:
+        return declared_vocab
+
     target_vocab_size = _vocab_size_from_checkpoint(checkpoint)
     disease = str(checkpoint.get("disease") or "").lower()
     stage_name = str(checkpoint.get("stage_name") or "").lower()
-    candidates = [path for path in _candidate_vocab_paths() if path.exists()]
+    model_type = str(checkpoint.get("model_type") or "").lower()
+    candidates = [path for path in _candidate_vocab_paths(checkpoint_path) if path.exists()]
 
     matching: list[tuple[int, Path]] = []
     for path in candidates:
@@ -160,6 +207,10 @@ def _resolve_default_vocab(checkpoint_path: Path) -> Path:
             score += 2
         if "pretrain" in path_name and stage_name == "pretrain":
             score += 2
+        if "vocab_ar" in path_name and model_type == "smilesvae_ar":
+            score += 4
+        if "models/ar" in str(path).replace("\\", "/").lower() and model_type == "smilesvae_ar":
+            score += 3
         if path.name == "vocab.json":
             score += 1
         matching.append((score, path))
@@ -187,6 +238,14 @@ def _infer_model_max_length(checkpoint: dict[str, Any], vocab_size: int) -> int:
 
 
 def _load_model(checkpoint_path: Path, vocab_path: Path, device: torch.device):
+    """
+    Load a Genorova model checkpoint, supporting both model types:
+      - "VAE"          : original parallel decoder (model.py)
+      - "SMILESVAE_AR" : autoregressive GRU decoder (model_ar.py)
+
+    The model_type key in the checkpoint dict selects which class to use.
+    Old checkpoints without model_type default to the original VAE.
+    """
     checkpoint = _load_checkpoint_state(checkpoint_path)
     state_dict = checkpoint["_resolved_model_state"]
 
@@ -194,7 +253,41 @@ def _load_model(checkpoint_path: Path, vocab_path: Path, device: torch.device):
     vocab_size = len(char2idx)
     max_length = _infer_model_max_length(checkpoint, vocab_size)
 
-    model = VAE(vocab_size=vocab_size, latent_dim=LATENT_DIM, max_length=max_length).to(device)
+    model_type = checkpoint.get("model_type", "VAE")
+
+    if model_type == "SMILESVAE_AR":
+        # Autoregressive VAE — import here to keep the old code path unchanged
+        from model_ar import SMILESVAE, HIDDEN_DIM, NUM_GRU_LAYERS, EMBED_DIM
+
+        # Infer architecture from saved state dict when explicit keys are absent.
+        # This handles checkpoints saved before arch keys were added to save_checkpoint().
+        _sd = state_dict  # shorthand
+        if checkpoint.get("hidden_dim") is not None:
+            _hidden_dim = checkpoint["hidden_dim"]
+            _num_layers  = checkpoint["num_gru_layers"]
+            _embed_dim   = checkpoint["embed_dim"]
+        else:
+            # Derive from weight shapes: GRU weight_hh_l0 is [3*hidden, hidden]
+            _embed_dim   = _sd["decoder.embed.weight"].shape[1]
+            _hidden_dim  = _sd["decoder.gru.weight_hh_l0"].shape[1]
+            _num_layers  = sum(
+                1 for k in _sd if k.startswith("decoder.gru.weight_hh_l")
+            )
+
+        model = SMILESVAE(
+            vocab_size=vocab_size,
+            latent_dim=LATENT_DIM,
+            max_length=max_length,
+            hidden_dim=_hidden_dim,
+            num_gru_layers=_num_layers,
+            embed_dim=_embed_dim,
+        )
+        # Store special token ids so decode() uses the right BOS/EOS/PAD
+        model.set_special_tokens(char2idx)
+    else:
+        model = VAE(vocab_size=vocab_size, latent_dim=LATENT_DIM, max_length=max_length)
+
+    model = model.to(device)
     model.load_state_dict(state_dict)
     model.eval()
     return model, checkpoint, char2idx, idx2char, max_length
@@ -211,8 +304,45 @@ def _decode_with_debug(
     return rows
 
 
+def _decode_latent_batch(
+    model: VAE,
+    checkpoint: dict[str, Any],
+    z: torch.Tensor,
+    idx2char: dict[int, str],
+    char2idx: dict[str, int],
+    *,
+    top_k: int,
+    repetition_penalty: float,
+    structural_guard_strength: float,
+    temperature: float,
+    min_generation_length: int,
+):
+    if checkpoint.get("model_type") == "SMILESVAE_AR":
+        token_ids = model.generate_from_latent(
+            z,
+            temperature=temperature,
+            top_k=top_k,
+            min_generation_length=min_generation_length,
+        )
+        return _decode_with_debug(token_ids, idx2char, char2idx)
+
+    recon = model.decode(z)
+    indices = select_token_ids_from_logits(
+        recon,
+        char2idx,
+        temperature=temperature,
+        strategy="sample" if top_k else "greedy",
+        top_k=top_k,
+        repetition_penalty=repetition_penalty,
+        min_tokens_before_stop=2,
+        structural_guard_strength=structural_guard_strength,
+    )
+    return _decode_with_debug(indices, idx2char, char2idx)
+
+
 def _generate_random(
     model: VAE,
+    checkpoint: dict[str, Any],
     idx2char: dict[int, str],
     char2idx: dict[str, int],
     num_samples: int,
@@ -222,32 +352,35 @@ def _generate_random(
     repetition_penalty: float,
     structural_guard_strength: float,
     temperature: float,
+    min_generation_length: int,
 ):
     with torch.no_grad():
         z = torch.randn(num_samples, LATENT_DIM, device=device)
-        recon = model.decode(z)
-        indices = select_token_ids_from_logits(
-            recon,
-            char2idx,
-            temperature=temperature,
-            strategy="sample" if top_k else "greedy",
+        decoded = _decode_latent_batch(
+            model=model,
+            checkpoint=checkpoint,
+            z=z,
+            idx2char=idx2char,
+            char2idx=char2idx,
             top_k=top_k,
             repetition_penalty=repetition_penalty,
-            min_tokens_before_stop=2,
             structural_guard_strength=structural_guard_strength,
+            temperature=temperature,
+            min_generation_length=min_generation_length,
         )
-    decoded = _decode_with_debug(indices, idx2char, char2idx)
     return decoded, {
         "latent_source": "random",
         "latent_std": round(float(z.std().item()), 6),
         "top_k": top_k,
         "repetition_penalty": repetition_penalty,
         "structural_guard_strength": structural_guard_strength,
+        "min_generation_length": min_generation_length if checkpoint.get("model_type") == "SMILESVAE_AR" else None,
     }
 
 
 def _generate_guided(
     model: VAE,
+    checkpoint: dict[str, Any],
     reference_smiles: list[str],
     char2idx: dict[str, int],
     idx2char: dict[int, str],
@@ -259,6 +392,7 @@ def _generate_guided(
     top_k: int,
     repetition_penalty: float,
     structural_guard_strength: float,
+    min_generation_length: int,
 ):
     if not reference_smiles:
         raise ValueError("Guided generation requires at least one reference molecule.")
@@ -283,18 +417,20 @@ def _generate_guided(
             index = torch.randint(0, len(all_mu), (this_batch,))
             z = all_mu[index].to(device)
             z = z + (torch.randn_like(z) * temperature)
-            recon = model.decode(z)
-            indices = select_token_ids_from_logits(
-                recon,
-                char2idx,
-                temperature=max(temperature, 0.2),
-                strategy="sample",
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                min_tokens_before_stop=2,
-                structural_guard_strength=structural_guard_strength,
+            generated.extend(
+                _decode_latent_batch(
+                    model=model,
+                    checkpoint=checkpoint,
+                    z=z,
+                    idx2char=idx2char,
+                    char2idx=char2idx,
+                    top_k=top_k,
+                    repetition_penalty=repetition_penalty,
+                    structural_guard_strength=structural_guard_strength,
+                    temperature=max(temperature, 0.2),
+                    min_generation_length=min_generation_length,
+                )
             )
-            generated.extend(_decode_with_debug(indices, idx2char, char2idx))
 
     return generated, {
         "latent_source": "guided",
@@ -305,6 +441,7 @@ def _generate_guided(
         "top_k": top_k,
         "repetition_penalty": repetition_penalty,
         "structural_guard_strength": structural_guard_strength,
+        "min_generation_length": min_generation_length if checkpoint.get("model_type") == "SMILESVAE_AR" else None,
     }
 
 
@@ -668,6 +805,7 @@ def evaluate_generation(
     top_k: int,
     repetition_penalty: float,
     structural_guard_strength: float,
+    min_generation_length: int,
 ) -> dict[str, Any]:
     Chem, _, _ = _require_rdkit()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -691,6 +829,7 @@ def evaluate_generation(
     if strategy == "guided":
         decoded_rows, latent_debug = _generate_guided(
             model=model,
+            checkpoint=checkpoint,
             reference_smiles=reference_smiles,
             char2idx=char2idx,
             idx2char=idx2char,
@@ -701,10 +840,12 @@ def evaluate_generation(
             top_k=top_k,
             repetition_penalty=repetition_penalty,
             structural_guard_strength=structural_guard_strength,
+            min_generation_length=min_generation_length,
         )
     else:
         decoded_rows, latent_debug = _generate_random(
             model=model,
+            checkpoint=checkpoint,
             idx2char=idx2char,
             char2idx=char2idx,
             num_samples=num_samples,
@@ -713,6 +854,7 @@ def evaluate_generation(
             repetition_penalty=repetition_penalty,
             structural_guard_strength=structural_guard_strength,
             temperature=max(temperature, 0.2),
+            min_generation_length=min_generation_length,
         )
 
     records: list[dict[str, Any]] = []
@@ -798,6 +940,9 @@ def evaluate_generation(
     invalidity_breakdown = _invalidity_breakdown(generated_df)
     empty_count = int((generated_df["raw_smiles"].fillna("") == "").sum()) if not generated_df.empty else 0
     non_empty_lengths = generated_df["raw_length"].dropna() if "raw_length" in generated_df.columns else pd.Series(dtype=float)
+    valid_lengths = pd.to_numeric(valid_df.get("raw_length"), errors="coerce").dropna() if not valid_df.empty else pd.Series(dtype=float)
+    filtered_lengths = pd.to_numeric(filtered_candidates_df.get("raw_length"), errors="coerce").dropna() if not filtered_candidates_df.empty else pd.Series(dtype=float)
+    is_ar_model = checkpoint.get("model_type") == "SMILESVAE_AR"
 
     metrics = {
         "generated_at": datetime.now().isoformat(),
@@ -809,6 +954,7 @@ def evaluate_generation(
         "top_k": int(top_k),
         "repetition_penalty": float(repetition_penalty),
         "structural_guard_strength": float(structural_guard_strength),
+        "min_generation_length": int(min_generation_length) if is_ar_model else None,
         "seed": seed,
         "requested_samples": int(num_samples),
         "reference_source": reference_source,
@@ -840,6 +986,16 @@ def evaluate_generation(
             "min": round(float(non_empty_lengths.min()), 4) if not non_empty_lengths.empty else None,
             "max": round(float(non_empty_lengths.max()), 4) if not non_empty_lengths.empty else None,
         },
+        "length_summary_valid_strings": {
+            "mean": round(float(valid_lengths.mean()), 4) if not valid_lengths.empty else None,
+            "min": round(float(valid_lengths.min()), 4) if not valid_lengths.empty else None,
+            "max": round(float(valid_lengths.max()), 4) if not valid_lengths.empty else None,
+        },
+        "length_summary_filtered_candidates": {
+            "mean": round(float(filtered_lengths.mean()), 4) if not filtered_lengths.empty else None,
+            "min": round(float(filtered_lengths.min()), 4) if not filtered_lengths.empty else None,
+            "max": round(float(filtered_lengths.max()), 4) if not filtered_lengths.empty else None,
+        },
         "debug_summary": {
             "empty_string_count": empty_count,
             "empty_string_pct": _pct(empty_count, int(len(generated_df))),
@@ -857,12 +1013,21 @@ def evaluate_generation(
             valid_df,
             ["molecular_weight", "logp", "tpsa", "hbd", "hba", "rotatable_bonds", "qed_score", "sa_score"],
         ),
+        "property_summary_filtered_candidates": _summarize_numeric(
+            filtered_candidates_df,
+            ["molecular_weight", "logp", "tpsa", "hbd", "hba", "rotatable_bonds", "qed_score", "sa_score"],
+        ),
         "scoring_summary_unique_valid": {
             "average_clinical_score": round(float(scored_df["clinical_score"].mean()), 4) if not scored_df.empty else None,
             "best_clinical_score": round(float(scored_df["clinical_score"].max()), 4) if not scored_df.empty else None,
             "top_n": top_n,
         },
         "filtering_summary": filtering_summary,
+        "fragment_summary": {
+            "min_generation_length": int(min_generation_length) if is_ar_model else None,
+            "valid_below_min_length_count": int((valid_lengths < min_generation_length).sum()) if is_ar_model and not valid_lengths.empty else None,
+            "filtered_below_min_length_count": int((filtered_lengths < min_generation_length).sum()) if is_ar_model and not filtered_lengths.empty else None,
+        },
     }
 
     top_candidates = (
@@ -949,6 +1114,7 @@ def evaluate_generation(
             f"- Top-k: `{top_k}`",
             f"- Repetition penalty: `{repetition_penalty}`",
             f"- Structural guard strength: `{structural_guard_strength}`",
+            f"- AR minimum generation length: `{metrics['min_generation_length']}`",
             f"- Requested samples: `{num_samples}`",
             f"- Reference source for novelty: `{reference_source}`",
             f"- Checkpoint stage: `{checkpoint.get('stage_name')}`",
@@ -968,6 +1134,9 @@ def evaluate_generation(
             f"| Novelty among unique valid | {metrics['rates']['novelty_pct_of_unique_valid']}% |",
             f"| Average clinical score (unique valid) | {avg_score_display if avg_score_display is not None else 'N/A'} |",
             f"| Best clinical score (unique valid) | {best_score_display if best_score_display is not None else 'N/A'} |",
+            f"| Mean generated length | {metrics['length_summary_raw_strings']['mean'] if metrics['length_summary_raw_strings']['mean'] is not None else 'N/A'} |",
+            f"| Mean valid length | {metrics['length_summary_valid_strings']['mean'] if metrics['length_summary_valid_strings']['mean'] is not None else 'N/A'} |",
+            f"| Mean filtered-candidate length | {metrics['length_summary_filtered_candidates']['mean'] if metrics['length_summary_filtered_candidates']['mean'] is not None else 'N/A'} |",
             "",
             "## Filtering Summary",
             "",
@@ -976,6 +1145,8 @@ def evaluate_generation(
             f"| Unique valid candidate pool | {filtering_summary['unique_valid_candidates']} |",
             f"| Filtered computational candidates | {filtering_summary['filtered_candidate_count']} |",
             f"| Filter pass rate | {filtering_summary['filtered_candidate_pct_of_unique_valid']}% |",
+            f"| Mean valid MW | {metrics['property_summary_valid_rows']['molecular_weight']['mean'] if metrics['property_summary_valid_rows']['molecular_weight'] else 'N/A'} |",
+            f"| Mean valid QED | {metrics['property_summary_valid_rows']['qed_score']['mean'] if metrics['property_summary_valid_rows']['qed_score'] else 'N/A'} |",
             f"| Rejection reasons | `{filtering_summary['rejection_reason_counts']}` |",
             "",
             "## Top Filtered Computational Candidates",
@@ -1098,6 +1269,7 @@ def compare_checkpoints(
     top_k: int,
     repetition_penalty: float,
     structural_guard_strength: float,
+    min_generation_length: int,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -1122,6 +1294,7 @@ def compare_checkpoints(
             top_k=top_k,
             repetition_penalty=repetition_penalty,
             structural_guard_strength=structural_guard_strength,
+            min_generation_length=min_generation_length,
         )
         metrics = result["metrics"]
         row = {
@@ -1141,6 +1314,18 @@ def compare_checkpoints(
             "filtered_candidate_pct_of_unique_valid": metrics["filtering_summary"]["filtered_candidate_pct_of_unique_valid"],
             "average_clinical_score": metrics["scoring_summary_unique_valid"]["average_clinical_score"],
             "best_clinical_score": metrics["scoring_summary_unique_valid"]["best_clinical_score"],
+            "mean_raw_length": metrics["length_summary_raw_strings"]["mean"],
+            "mean_valid_length": metrics["length_summary_valid_strings"]["mean"],
+            "mean_valid_molecular_weight": (
+                metrics["property_summary_valid_rows"]["molecular_weight"]["mean"]
+                if metrics["property_summary_valid_rows"]["molecular_weight"]
+                else None
+            ),
+            "mean_valid_qed": (
+                metrics["property_summary_valid_rows"]["qed_score"]["mean"]
+                if metrics["property_summary_valid_rows"]["qed_score"]
+                else None
+            ),
             "output_dir": str(checkpoint_dir),
             "top_invalid_reasons": json.dumps(metrics["debug_summary"]["invalid_reason_counts"]),
             "common_invalid_endings": json.dumps(metrics["debug_summary"]["invalidity_breakdown"]["common_invalid_endings"]),
@@ -1271,6 +1456,7 @@ def compare_checkpoints(
             "top_k": top_k,
             "repetition_penalty": repetition_penalty,
             "structural_guard_strength": structural_guard_strength,
+            "min_generation_length": min_generation_length,
             "num_samples": num_samples,
             "reference_source": reference_csv or reference_dataset,
             "seed": seed,
@@ -1291,6 +1477,7 @@ def compare_checkpoints(
                 f"- Top-k: `{top_k}`",
                 f"- Repetition penalty: `{repetition_penalty}`",
                 f"- Structural guard strength: `{structural_guard_strength}`",
+                f"- AR minimum generation length: `{min_generation_length}`",
                 f"- Samples per checkpoint: `{num_samples}`",
                 f"- Reference source: `{reference_csv or reference_dataset}`",
                 f"- Candidate filters: `{json.dumps(filter_rules, sort_keys=True)}`",
@@ -1321,6 +1508,9 @@ def compare_checkpoints(
                         "validity_pct",
                         "filtered_candidate_count",
                         "unique_valid_count",
+                        "mean_valid_length",
+                        "mean_valid_molecular_weight",
+                        "mean_valid_qed",
                         "novelty_pct_of_unique_valid",
                         "average_clinical_score",
                         "best_clinical_score",
@@ -1372,6 +1562,7 @@ def build_parser():
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K, help="Top-k token filtering for decode-time sampling.")
     parser.add_argument("--repetition-penalty", type=float, default=DEFAULT_REPETITION_PENALTY, help="Penalty applied to repeating the previous token during decoding.")
     parser.add_argument("--structural-guard-strength", type=float, default=DEFAULT_STRUCTURAL_GUARD_STRENGTH, help="Decode-time structural guard strength. Set to 0 to disable the new guard logic.")
+    parser.add_argument("--min-generation-length", type=int, default=DEFAULT_AR_MIN_GENERATION_LENGTH, help="AR-only: minimum number of generated tokens before EOS is allowed. Ignored for the old non-autoregressive VAE.")
     parser.add_argument("--filter-qed-min", type=float, default=DEFAULT_FILTERS["qed_min"], help="Minimum QED for filtered computational candidates.")
     parser.add_argument("--filter-sa-max", type=float, default=DEFAULT_FILTERS["sa_max"], help="Maximum SA score for filtered computational candidates.")
     parser.add_argument("--filter-mw-min", type=float, default=DEFAULT_FILTERS["mw_min"], help="Minimum molecular weight for filtered computational candidates.")
@@ -1418,6 +1609,7 @@ def main():
             top_k=args.top_k,
             repetition_penalty=args.repetition_penalty,
             structural_guard_strength=args.structural_guard_strength,
+            min_generation_length=args.min_generation_length,
         )
         print("\n" + "=" * 72)
         print("MULTI-CHECKPOINT EVALUATION COMPLETE")
@@ -1453,6 +1645,7 @@ def main():
         top_k=args.top_k,
         repetition_penalty=args.repetition_penalty,
         structural_guard_strength=args.structural_guard_strength,
+        min_generation_length=args.min_generation_length,
     )
 
     metrics = results["metrics"]
@@ -1464,6 +1657,7 @@ def main():
     print(f"Top-k:             {metrics['top_k']}")
     print(f"Rep penalty:       {metrics['repetition_penalty']}")
     print(f"Guard strength:    {metrics['structural_guard_strength']}")
+    print(f"AR min length:     {metrics['min_generation_length']}")
     print(f"Uniqueness:        {metrics['rates']['uniqueness_pct_of_valid']}% of valid")
     print(f"Novelty:           {metrics['rates']['novelty_pct_of_valid']}% of valid")
     print(f"Filtered pass:     {metrics['filtering_summary']['filtered_candidate_pct_of_unique_valid']}% of unique valid")

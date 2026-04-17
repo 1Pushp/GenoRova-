@@ -13,7 +13,6 @@ COMMANDS:
 
 USAGE EXAMPLES:
     python genorova_cli.py generate --disease diabetes --count 100
-    python genorova_cli.py generate --disease infection --count 100
     python genorova_cli.py score --file outputs/generated/molecules.csv
     python genorova_cli.py report
     python genorova_cli.py train --disease diabetes --epochs 100
@@ -66,6 +65,13 @@ def cmd_generate(args):
     disease = args.disease.lower()
     if disease not in ("diabetes", "infection"):
         print("[ERROR] --disease must be 'diabetes' or 'infection'")
+        sys.exit(1)
+
+    from science_evidence import ACTIVE_DISEASE, ACTIVE_SCOPE_NOTE, evaluate_candidate_rows
+
+    if disease != ACTIVE_DISEASE:
+        print(f"[ERROR] The active Genorova generation path is currently standardized to '{ACTIVE_DISEASE}'.")
+        print(f"        {ACTIVE_SCOPE_NOTE}")
         sys.exit(1)
 
     csv_path   = DATA_DIR   / f"{disease}_molecules.csv"
@@ -150,9 +156,25 @@ def cmd_generate(args):
             sys.exit(1)
 
         import pandas as pd
-        df_out = (pd.DataFrame(results)
-                  .sort_values("clinical_score", ascending=False)
-                  .reset_index(drop=True))
+        ranked_rows = (pd.DataFrame(results)
+                       .sort_values("clinical_score", ascending=False)
+                       .reset_index(drop=True))
+        reevaluated = evaluate_candidate_rows(
+            ranked_rows.to_dict("records"),
+            result_source="cli_ranked_candidates",
+            fallback_used=False,
+            max_candidates=min(args.count, len(ranked_rows)),
+            confidence_note=(
+                "CLI candidate set revalidated under the active diabetes / DPP4 / sitagliptin workflow."
+            ),
+            validation_status="canonical_cli_generation",
+            limitations=[
+                ACTIVE_SCOPE_NOTE,
+                "These rows are revalidated computational candidates, not experimental leads.",
+            ],
+            recommended_next_step="Review comparator deltas and major risks before treating any row as a lead.",
+        )
+        df_out = pd.DataFrame(reevaluated).reset_index(drop=True)
         df_out.index += 1
 
         # Save
@@ -161,9 +183,9 @@ def cmd_generate(args):
         df_out.to_csv(out_path, index=False)
 
         print(f"\n[OK] Generated {len(df_out)} molecules → {out_path}")
-        print(f"[OK] Best clinical score: {df_out['clinical_score'].max():.4f}")
+        print(f"[OK] Best model score: {df_out['clinical_score'].max():.4f}")
         print(f"\nTop 5:")
-        print(df_out[["smiles", "molecular_weight", "qed_score", "clinical_score", "recommendation"]].head())
+        print(df_out[["smiles", "molecular_weight", "qed_score", "clinical_score", "final_decision", "recommendation"]].head())
 
     except ImportError as e:
         print(f"[ERROR] Missing dependency: {e}")
@@ -193,6 +215,7 @@ def cmd_score(args):
     try:
         import pandas as pd
         from run_pipeline import silent_score_molecule
+        from science_evidence import ACTIVE_SCOPE_NOTE, evaluate_candidate_rows
 
         df_in = pd.read_csv(args.file)
 
@@ -221,9 +244,23 @@ def cmd_score(args):
             print("[ERROR] No molecules could be scored.")
             sys.exit(1)
 
-        df_out = (pd.DataFrame(results)
-                  .sort_values("clinical_score", ascending=False)
-                  .reset_index(drop=True))
+        ranked_rows = (pd.DataFrame(results)
+                       .sort_values("clinical_score", ascending=False)
+                       .reset_index(drop=True))
+        reevaluated = evaluate_candidate_rows(
+            ranked_rows.to_dict("records"),
+            result_source="cli_scored_candidates",
+            fallback_used=False,
+            max_candidates=len(ranked_rows),
+            confidence_note="CLI scoring output revalidated under the active diabetes / DPP4 / sitagliptin workflow.",
+            validation_status="canonical_cli_scoring",
+            limitations=[
+                ACTIVE_SCOPE_NOTE,
+                "These are computational screening rows, not clinical or experimental results.",
+            ],
+            recommended_next_step="Compare shortlisted rows against sitagliptin and inspect the evidence ledger fields.",
+        )
+        df_out = pd.DataFrame(reevaluated).reset_index(drop=True)
         df_out.index += 1
 
         # Save to same location with _scored suffix
@@ -232,9 +269,9 @@ def cmd_score(args):
         df_out.to_csv(str(out_path), index=False)
 
         print(f"\n[OK] Scored {len(df_out)} molecules → {out_path}")
-        print(f"[OK] Best score: {df_out['clinical_score'].max():.4f}")
+        print(f"[OK] Best model score: {df_out['clinical_score'].max():.4f}")
         print(f"\nTop 5:")
-        cols = [c for c in ["smiles","molecular_weight","qed_score","clinical_score","recommendation"] if c in df_out.columns]
+        cols = [c for c in ["smiles","molecular_weight","qed_score","clinical_score","final_decision","recommendation"] if c in df_out.columns]
         print(df_out[cols].head())
 
     except Exception as e:
@@ -402,7 +439,6 @@ def build_parser() -> argparse.ArgumentParser:
         epilog = """
 EXAMPLES:
   python genorova_cli.py generate --disease diabetes --count 100
-  python genorova_cli.py generate --disease infection --count 100
   python genorova_cli.py score    --file outputs/generated/molecules.csv
   python genorova_cli.py report
   python genorova_cli.py train    --disease diabetes --epochs 100
@@ -416,8 +452,8 @@ EXAMPLES:
 
     # ---- generate ----
     p_gen = sub.add_parser("generate", help="Generate new drug molecules")
-    p_gen.add_argument("--disease", required=True, choices=["diabetes","infection"],
-                       help="Target disease area")
+    p_gen.add_argument("--disease", required=True, choices=["diabetes"],
+                       help="Active disease area for the canonical workflow")
     p_gen.add_argument("--count", type=int, default=100,
                        help="Number of molecules to generate (default: 100)")
 

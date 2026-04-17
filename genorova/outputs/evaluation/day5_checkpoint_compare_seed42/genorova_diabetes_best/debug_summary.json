@@ -1,0 +1,27 @@
+{
+  "empty_string_count": 0,
+  "invalid_reason_counts": {
+    "unbalanced_parentheses": 35,
+    "ring_closure_mismatch": 9,
+    "long_repetitive_fragment": 6
+  },
+  "top_decoded_tokens": {
+    "c": 885,
+    "C": 329,
+    ")": 142,
+    "(": 117,
+    "1": 86,
+    "O": 55,
+    "2": 43,
+    "=": 36,
+    "N": 22,
+    "n": 8
+  },
+  "latent_debug": {
+    "latent_source": "guided",
+    "anchor_count": 1000,
+    "anchor_mu_std": 0.388652,
+    "anchor_mu_mean_abs": 0.324468,
+    "temperature": 0.3
+  }
+}

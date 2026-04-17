@@ -1,0 +1,77 @@
+{
+  "created_at": "2026-04-17T16:26:02.995274+00:00",
+  "bundle_root": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z",
+  "items": [
+    {
+      "label": "auth_db",
+      "kind": "file_bundle",
+      "source": "C:\\Users\\pushp\\AppData\\Local\\GenorovaAI\\genorova_auth.db",
+      "backup_dir": null,
+      "copied_files": [],
+      "status": "missing"
+    },
+    {
+      "label": "molecule_db",
+      "kind": "file_bundle",
+      "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\genorova_memory.db",
+      "backup_dir": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\molecule_db",
+      "copied_files": [
+        {
+          "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\genorova_memory.db",
+          "backup": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\molecule_db\\genorova_memory.db",
+          "name": "genorova_memory.db"
+        },
+        {
+          "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\genorova_memory.db-journal",
+          "backup": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\molecule_db\\genorova_memory.db-journal",
+          "name": "genorova_memory.db-journal"
+        }
+      ],
+      "status": "copied"
+    },
+    {
+      "label": "chat_memory_db",
+      "kind": "file_bundle",
+      "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\runtime\\chat_memory.db",
+      "backup_dir": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\chat_memory_db",
+      "copied_files": [
+        {
+          "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\runtime\\chat_memory.db",
+          "backup": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\chat_memory_db\\chat_memory.db",
+          "name": "chat_memory.db"
+        },
+        {
+          "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\runtime\\chat_memory.db-journal",
+          "backup": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\chat_memory_db\\chat_memory.db-journal",
+          "name": "chat_memory.db-journal"
+        }
+      ],
+      "status": "copied"
+    },
+    {
+      "label": "generated_outputs",
+      "kind": "directory",
+      "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\generated",
+      "backup_dir": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\generated_outputs",
+      "status": "copied"
+    },
+    {
+      "label": "html_report",
+      "kind": "file_bundle",
+      "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\genorova_report.html",
+      "backup_dir": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\html_report",
+      "copied_files": [
+        {
+          "source": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\genorova_report.html",
+          "backup": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\backups\\genorova_runtime_backup_20260417T162602Z\\html_report\\genorova_report.html",
+          "name": "genorova_report.html"
+        }
+      ],
+      "status": "copied"
+    }
+  ],
+  "notes": [
+    "The live src.api chat-session store is in process memory only and does not survive restart.",
+    "SQLite sidecar files (-wal, -shm, -journal) are copied when present."
+  ]
+}

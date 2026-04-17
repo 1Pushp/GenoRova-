@@ -1,0 +1,51 @@
+sample_index,raw_smiles,raw_length,first_pad_position,effective_token_ids,canonical_smiles,is_valid_rdkit,is_unique_among_valid,valid_occurrences,is_novel_vs_reference,invalid_reason
+1,Cc1ccc(2ccCC(=O)cCccc)cNccc11C1,31,31,19 32 8 32 32 32 2 9 32 32 19 19 2 16 25 3 32 19 32 32 32 3 32 24 32 32 32 8 8 19 8,,False,False,0,False,ring_closure_mismatch
+2,CC(CCC)CCCCCCC(=O)CcccccccccccCcc1,34,34,19 19 2 19 19 19 3 19 19 19 19 19 19 19 2 16 25 3 19 32 32 32 32 32 32 32 32 32 32 32 19 32 32 8,,False,False,0,False,ring_closure_mismatch
+3,Nc1ccc(ccccc)c2cccccccccc())CCC3,32,32,24 32 8 32 32 32 2 32 32 32 32 32 3 32 9 32 32 32 32 32 32 32 32 32 32 2 3 3 19 19 19 10,,False,False,0,False,unbalanced_parentheses
+4,Cc1ccc2ccccccc(C(Cc)c1cCc)c1,28,28,19 32 8 32 32 32 9 32 32 32 32 32 32 32 2 19 2 19 32 3 32 8 32 19 32 3 32 8,,False,False,0,False,ring_closure_mismatch
+5,COc1ccccccccc(CC)C2N)CCC)CC,27,27,19 25 32 8 32 32 32 32 32 32 32 32 32 2 19 19 3 19 9 24 3 19 19 19 3 19 19,,False,False,0,False,unbalanced_parentheses
+6,OCC(O)C(CCC(=O)N1cCc(ccCCC)=(Ccc)c1,35,35,25 19 19 2 25 3 19 2 19 19 19 2 16 25 3 24 8 32 19 32 2 32 32 19 19 19 3 16 2 19 32 32 3 32 8,,False,False,0,False,unbalanced_parentheses
+7,Cc1ccccc(ccC(CCC(Ccccc((cccO)CC)c)cc)ccc))c,43,43,19 32 8 32 32 32 32 32 2 32 32 19 2 19 19 19 2 19 32 32 32 32 2 2 32 32 32 25 3 19 19 3 32 3 32 32 3 32 32 32 3 3 32,,False,False,0,False,unbalanced_parentheses
+8,COc1cccccccc2)c()cccccccccccc)cc11,34,34,19 25 32 8 32 32 32 32 32 32 32 32 9 3 32 2 3 32 32 32 32 32 32 32 32 32 32 32 32 3 32 32 8 8,,False,False,0,False,unbalanced_parentheses
+9,Cc1ccc((CccCccccccccccccccccc)cc2)c,35,35,19 32 8 32 32 32 2 2 19 32 32 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 3 32 32 9 3 32,,False,False,0,False,ring_closure_mismatch
+10,CC((CCCCCCCO)(CcccccccccccC))CCCCN,34,34,19 19 2 2 19 19 19 19 19 19 19 25 3 2 19 32 32 32 32 32 32 32 32 32 32 32 19 3 3 19 19 19 19 24,,False,False,0,False,long_repetitive_fragment
+11,CCCCO)1ccccc2ccccCC)cC)cO)ccccccc22,35,35,19 19 19 19 25 3 8 32 32 32 32 32 9 32 32 32 32 19 19 3 32 19 3 32 25 3 32 32 32 32 32 32 32 9 9,,False,False,0,False,unbalanced_parentheses
+12,CCC(=C)CCCcccccccccccccccccccC))cc2cCCc,39,39,19 19 19 2 16 19 3 19 19 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 19 3 3 32 32 9 32 19 19 32,,False,False,0,False,unbalanced_parentheses
+13,COc1cc(NCCcO)(Cccccc2ccccc2))C1cc1,34,34,19 25 32 8 32 32 2 24 19 19 32 25 3 2 19 32 32 32 32 32 9 32 32 32 32 32 9 3 3 19 8 32 32 8,,False,False,0,False,unbalanced_parentheses
+14,COc1cccc(cc12/C(=O)c2cccccc)c)C1)))c2,37,37,19 25 32 8 32 32 32 32 2 32 32 8 9 7 19 2 16 25 3 32 9 32 32 32 32 32 32 3 32 3 19 8 3 3 3 32 9,,False,False,0,False,unbalanced_parentheses
+15,CC(COCccccccccccccccccccccccc1c,31,31,19 19 2 19 25 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 8 32,,False,False,0,False,unbalanced_parentheses
+16,CC(C)CCCCcccccccccccccccccc1,28,28,19 19 2 19 3 19 19 19 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 8,,False,False,0,False,ring_closure_mismatch
+17,CCOC(=O)c1cnc(CN)c2ccccccccC))c11,33,33,19 19 25 19 2 16 25 3 32 8 32 35 32 2 19 24 3 32 9 32 32 32 32 32 32 32 32 19 3 3 32 8 8,,False,False,0,False,unbalanced_parentheses
+18,COc1cccc(cc1N)C(=O)N=ccccCc)ccC1c1,34,34,19 25 32 8 32 32 32 32 2 32 32 8 24 3 19 2 16 25 3 24 16 32 32 32 32 19 32 3 32 32 19 8 32 8,,False,False,0,False,unbalanced_parentheses
+19,CCCC)c1cccccccCC=O)cccccccccc,29,29,19 19 19 19 3 32 8 32 32 32 32 32 32 32 19 19 16 25 3 32 32 32 32 32 32 32 32 32 32,,False,False,0,False,unbalanced_parentheses
+20,COc1cccc(C(1CCCCCCC(=N)cccc1,28,28,19 25 32 8 32 32 32 32 2 19 2 8 19 19 19 19 19 19 19 2 16 24 3 32 32 32 32 8,,False,False,0,False,unbalanced_parentheses
+21,C=C1cccccccOCcCCcccccccccccccc1,31,31,19 16 19 8 32 32 32 32 32 32 32 25 19 32 19 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 8,,False,False,0,False,long_repetitive_fragment
+22,CC(C(=O)c1ccccC2ccccccccccccc))c)cccc2,38,38,19 19 2 19 2 16 25 3 32 8 32 32 32 32 19 9 32 32 32 32 32 32 32 32 32 32 32 32 32 3 3 32 3 32 32 32 32 9,,False,False,0,False,unbalanced_parentheses
+23,CC(CO)C(1cCCCC(N(cCc(ON(CC)c=O)cccccccc111,42,42,19 19 2 19 25 3 19 2 8 32 19 19 19 19 2 24 2 32 19 32 2 25 24 2 19 19 3 32 16 25 3 32 32 32 32 32 32 32 32 8 8 8,,False,False,0,False,unbalanced_parentheses
+24,COc1ccccccccc(CC)C2cccccccc1c,29,29,19 25 32 8 32 32 32 32 32 32 32 32 32 2 19 19 3 19 9 32 32 32 32 32 32 32 32 8 32,,False,False,0,False,ring_closure_mismatch
+25,Cc1cc(c)c2ccc(ccccccc((3))cC=3)cccccccc)11,42,42,19 32 8 32 32 2 32 3 32 9 32 32 32 2 32 32 32 32 32 32 32 2 2 10 3 3 32 19 16 10 3 32 32 32 32 32 32 32 32 3 8 8,,False,False,0,False,unbalanced_parentheses
+26,CC(CO))(=cccccccccccccccccCcCC)cccccccccc1,42,42,19 19 2 19 25 3 3 2 16 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 19 32 19 19 3 32 32 32 32 32 32 32 32 32 32 8,,False,False,0,False,unbalanced_parentheses
+27,CCCCcCccc(NC(ccCccc(c))cccccccccc2c11,37,37,19 19 19 19 32 19 32 32 32 2 24 19 2 32 32 19 32 32 32 2 32 3 3 32 32 32 32 32 32 32 32 32 32 9 32 8 8,,False,False,0,False,unbalanced_parentheses
+28,CC(C(CO)CCCCCC(=O)ccccccccccc))cccccC1,38,38,19 19 2 19 2 19 25 3 19 19 19 19 19 19 2 16 25 3 32 32 32 32 32 32 32 32 32 32 32 3 3 32 32 32 32 32 19 8,,False,False,0,False,unbalanced_parentheses
+29,CCC(CC)CCCCCCC(=O)CC(cccccccc1,30,30,19 19 19 2 19 19 3 19 19 19 19 19 19 19 2 16 25 3 19 19 2 32 32 32 32 32 32 32 32 8,,False,False,0,False,unbalanced_parentheses
+30,Cc1ncc(2c2cccc3cccccc)cc))C2,28,28,19 32 8 35 32 32 2 9 32 9 32 32 32 32 10 32 32 32 32 32 32 3 32 32 3 3 19 9,,False,False,0,False,unbalanced_parentheses
+31,O=C(O)Cccccc2/CccO)cccccccc)cCC)cc1cc,37,37,25 16 19 2 25 3 19 32 32 32 32 32 9 7 19 32 32 25 3 32 32 32 32 32 32 32 32 3 32 19 19 3 32 32 8 32 32,,False,False,0,False,unbalanced_parentheses
+32,O=C(O)11cccc2cccc(cccccccccccc)ccc2cccc,39,39,25 16 19 2 25 3 8 8 32 32 32 32 9 32 32 32 32 2 32 32 32 32 32 32 32 32 32 32 32 32 3 32 32 32 9 32 32 32 32,,False,False,0,False,long_repetitive_fragment
+33,CC(C)n1ccc-c2cc2cccccc3ccccccc)cccccc21,39,39,19 19 2 19 3 35 8 32 32 32 5 32 9 32 32 9 32 32 32 32 32 32 10 32 32 32 32 32 32 32 3 32 32 32 32 32 32 9 8,,False,False,0,False,unbalanced_parentheses
+34,O=C(Nc1ccc(Br)cccCcccccCrcccccccc11,35,35,25 16 19 2 24 32 8 32 32 32 2 18 37 3 32 32 32 19 32 32 32 32 32 19 37 32 32 32 32 32 32 32 32 8 8,,False,False,0,False,unbalanced_parentheses
+35,Cc1ccc(ccccccc2cccccccc())c21CC,31,31,19 32 8 32 32 32 2 32 32 32 32 32 32 32 9 32 32 32 32 32 32 32 32 2 3 3 32 9 8 19 19,,False,False,0,False,long_repetitive_fragment
+36,CC(=O)c=cccccc(c(ccc(cN(CC(O)c)ccccccccc2cc,43,43,19 19 2 16 25 3 32 16 32 32 32 32 32 32 2 32 2 32 32 32 2 32 24 2 19 19 2 25 3 32 3 32 32 32 32 32 32 32 32 32 9 32 32,,False,False,0,False,unbalanced_parentheses
+37,COc1cccccc2n)((N)CC(=O)c2cc2)cccc1,34,34,19 25 32 8 32 32 32 32 32 32 9 35 3 2 2 24 3 19 19 2 16 25 3 32 9 32 32 9 3 32 32 32 32 8,,False,False,0,False,unbalanced_parentheses
+38,Cc1ccccccccccc(cccccccc(ccccccccn))c2c,38,38,19 32 8 32 32 32 32 32 32 32 32 32 32 32 2 32 32 32 32 32 32 32 32 2 32 32 32 32 32 32 32 32 35 3 3 32 9 32,,False,False,0,False,ring_closure_mismatch
+39,Nc1ncnc2cc3c(c1C(=CCCC(=O)NCC=O),32,32,24 32 8 35 32 35 32 9 32 32 10 32 2 32 8 19 2 16 19 19 19 19 2 16 25 3 24 19 19 16 25 3,,False,False,0,False,unbalanced_parentheses
+40,Cc1cc(C)c1@CC(CC)C(=O((C)cCC)C1)c,33,33,19 32 8 32 32 2 19 3 32 8 17 19 19 2 19 19 3 19 2 16 25 2 2 19 3 32 19 19 3 19 8 3 32,,False,False,0,False,ring_closure_mismatch
+41,CCC@H](C(=O)O)CCCCC(ccc(cccccccccccc)C1,39,39,19 19 19 17 21 30 2 19 2 16 25 3 25 3 19 19 19 19 19 2 32 32 32 2 32 32 32 32 32 32 32 32 32 32 32 32 3 19 8,,False,False,0,False,unbalanced_parentheses
+42,CC(C)=C)CCCCOcccccccccccccccc)cc1,33,33,19 19 2 19 3 16 19 3 19 19 19 19 25 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 3 32 32 8,,False,False,0,False,unbalanced_parentheses
+43,CC(C)CC(CCccccccccccccNCc)CCCC)cCcCCC,37,37,19 19 2 19 3 19 19 2 19 19 32 32 32 32 32 32 32 32 32 32 32 32 24 19 32 3 19 19 19 19 3 32 19 32 19 19 19,,False,False,0,False,unbalanced_parentheses
+44,C=C(=CCCcccccccccccccccccC)CCCC,31,31,19 16 19 2 16 19 19 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 19 3 19 19 19 19,,False,False,0,False,long_repetitive_fragment
+45,Cc1cccc2ccc1(CCCCCccc(((CCCO)C()))Cc]cC)O),42,42,19 32 8 32 32 32 32 9 32 32 32 8 2 19 19 19 19 19 32 32 32 2 2 2 19 19 19 25 3 19 2 3 3 3 19 32 30 32 19 3 25 3,,False,False,0,False,unbalanced_parentheses
+46,CCC(CCCC(=O)N)C(=O)c1cccccc(NcCCcccc)cc1cCF1,44,44,19 19 19 2 19 19 19 19 2 16 25 3 24 3 19 2 16 25 3 32 8 32 32 32 32 32 32 2 24 32 19 19 32 32 32 32 3 32 32 8 32 19 20 8,,False,False,0,False,ring_closure_mismatch
+47,CC(C(=O)C11Ccc()ccccc)cccccccccc,32,32,19 19 2 19 2 16 25 3 19 8 8 19 32 32 2 3 32 32 32 32 32 3 32 32 32 32 32 32 32 32 32 32,,False,False,0,False,long_repetitive_fragment
+48,O=C(OC11cccc2cccc(cccccccccccccccc2ccc,38,38,25 16 19 2 25 19 8 8 32 32 32 32 9 32 32 32 32 2 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 9 32 32 32,,False,False,0,False,unbalanced_parentheses
+49,CC(C)[Cc1CCN)/CC)CCc(CCcccH)c(cc))cc,36,36,19 19 2 19 3 28 19 32 8 19 19 24 3 7 19 19 3 19 19 32 2 19 19 32 32 32 21 3 32 2 32 32 3 3 32 32,,False,False,0,False,unbalanced_parentheses
+50,CC(Cc1cncc2cccc3ccccc)ccc)ccccccc2,34,34,19 19 2 19 32 8 32 35 32 32 9 32 32 32 32 10 32 32 32 32 32 3 32 32 32 3 32 32 32 32 32 32 32 9,,False,False,0,False,unbalanced_parentheses

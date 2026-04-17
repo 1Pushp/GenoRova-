@@ -1,0 +1,26 @@
+sample_index,raw_smiles,raw_length,first_pad_position,effective_token_ids,canonical_smiles,is_valid_rdkit,is_unique_among_valid,valid_occurrences,is_novel_vs_reference,invalid_reason
+1,CCC(CCCCCCNcCccccccccccccccccCl)ccCCCC,38,38,19 19 19 2 19 19 19 19 19 19 24 32 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 19 34 3 32 32 19 19 19 19,,False,False,0,False,rdkit_parse_failure
+2,CC((CCCCCCCCCC)(OCCc(cccccccc)ccccccc,37,37,19 19 2 2 19 19 19 19 19 19 19 19 19 19 3 2 25 19 19 32 2 32 32 32 32 32 32 32 32 3 32 32 32 32 32 32 32,,False,False,0,False,unbalanced_parentheses
+3,O=C(OCCCccccccccccccccccccCcCCC)cc2c1,37,37,25 16 19 2 25 19 19 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 19 32 19 19 19 3 32 32 9 32 8,,False,False,0,False,ring_closure_mismatch
+4,CC(CO)cccc-c2cccccccccccccccccccc2,34,34,19 19 2 19 25 3 32 32 32 32 5 32 9 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 9,,False,False,0,False,long_repetitive_fragment
+5,COc1cccc(cc1CCCCC(=c=c)ccccO)cc2)))cC2,38,38,19 25 32 8 32 32 32 32 2 32 32 8 19 19 19 19 19 2 16 32 16 32 3 32 32 32 32 25 3 32 32 9 3 3 3 32 19 9,,False,False,0,False,unbalanced_parentheses
+6,Cc1cccc-cccc(cc3ccccc)c(3)ccc2)c,32,32,19 32 8 32 32 32 32 5 32 32 32 32 2 32 32 10 32 32 32 32 32 3 32 2 10 3 32 32 32 9 3 32,,False,False,0,False,unbalanced_parentheses
+7,CN(C)CCC(O)cccccccccccccccc)c1,30,30,19 24 2 19 3 19 19 19 2 25 3 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 3 32 8,,False,False,0,False,unbalanced_parentheses
+8,O=C1O)cccccccccccccccccCO)CCCOC),32,32,25 16 19 8 25 3 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 19 25 3 19 19 19 25 19 3,,False,False,0,False,unbalanced_parentheses
+9,COc1cccccc(NCC(C)Nc(cc)c2cc1,28,28,19 25 32 8 32 32 32 32 32 32 2 24 19 19 2 19 3 24 32 2 32 32 3 32 9 32 32 8,,False,False,0,False,unbalanced_parentheses
+10,COc1cccc(N(Cnccc3ccccccccccccccc11,34,34,19 25 32 8 32 32 32 32 2 24 2 19 35 32 32 32 10 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 8 8,,False,False,0,False,unbalanced_parentheses
+11,CCOC(=O)c1cnc(CN)c2c)cOccc(C)c(cC)cc12.Cl,41,41,19 19 25 19 2 16 25 3 32 8 32 35 32 2 19 24 3 32 9 32 3 32 25 32 32 32 2 19 3 32 2 32 19 3 32 32 8 9 6 19 34,,False,False,0,False,unbalanced_parentheses
+12,CC(C)ccccccc2/C()C)c1cccccH)c)ccccc,35,35,19 19 2 19 3 32 32 32 32 32 32 32 9 7 19 2 3 19 3 32 8 32 32 32 32 32 21 3 32 3 32 32 32 32 32,,False,False,0,False,unbalanced_parentheses
+13,COc1cccccCccCcccccccccccccccc)ccc2c,35,35,19 25 32 8 32 32 32 32 32 19 32 32 19 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 3 32 32 32 9 32,,False,False,0,False,unbalanced_parentheses
+14,CCC(CC)CCNC(C)C(=O)c(ccccC1=c,29,29,19 19 19 2 19 19 3 19 19 24 19 2 19 3 19 2 16 25 3 32 2 32 32 32 32 19 8 16 32,,False,False,0,False,unbalanced_parentheses
+15,Ccc1cc2)cc2ncCN)C(=O)Nccccc()ccc3)ccn)cc1,41,41,19 32 32 8 32 32 9 3 32 32 9 35 32 19 24 3 19 2 16 25 3 24 32 32 32 32 32 2 3 32 32 32 10 3 32 32 35 3 32 32 8,,False,False,0,False,unbalanced_parentheses
+16,COc1cccc(C()O)((C)cccccccccc))c2C)=O,36,36,19 25 32 8 32 32 32 32 2 19 2 3 25 3 2 2 19 3 32 32 32 32 32 32 32 32 32 32 3 3 32 9 19 3 16 25,,False,False,0,False,unbalanced_parentheses
+17,C#C1cccc(ccC2ccCCC)cc1((c)cccccccc)ccC,38,38,19 1 19 8 32 32 32 32 2 32 32 19 9 32 32 19 19 19 3 32 32 8 2 2 32 3 32 32 32 32 32 32 32 32 3 32 32 19,,False,False,0,False,ring_closure_mismatch
+18,Cc1nccccccccccccccc)cC(=O)NCc=)ccc)c)cc),40,40,19 32 8 35 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 3 32 19 2 16 25 3 24 19 32 16 3 32 32 32 3 32 3 32 32 3,,False,False,0,False,unbalanced_parentheses
+19,Cc1nccccccccccccccccccccO)cCCCC)cc)C,36,36,19 32 8 35 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 32 25 3 32 19 19 19 19 3 32 32 3 19,,False,False,0,False,unbalanced_parentheses
+20,CCOC(=O)c1cnc(CN)c2ccccccc(O))cc12.c1,37,37,19 19 25 19 2 16 25 3 32 8 32 35 32 2 19 24 3 32 9 32 32 32 32 32 32 32 2 25 3 3 32 32 8 9 6 32 8,,False,False,0,False,unbalanced_parentheses
+21,CC(1ccccCNC(C)C(=O)c2cccccc)c1,30,30,19 19 2 8 32 32 32 32 19 24 19 2 19 3 19 2 16 25 3 32 9 32 32 32 32 32 32 3 32 8,,False,False,0,False,ring_closure_mismatch
+22,O=C(CC)CCNC(=OCc1ccccccccc1,27,27,25 16 19 2 19 19 3 19 19 24 19 2 16 25 19 32 8 32 32 32 32 32 32 32 32 32 8,,False,False,0,False,unbalanced_parentheses
+23,CCCCC1(CCc1CCC(C(NO)(C(CC)cccc,30,30,19 19 19 19 19 8 2 19 19 32 8 19 19 19 2 19 2 24 25 3 2 19 2 19 19 3 32 32 32 32,,False,False,0,False,unbalanced_parentheses
+24,CCc1ccccc(cO)cccccccccccccCCCCO)cc)C2,37,37,19 19 32 8 32 32 32 32 32 2 32 25 3 32 32 32 32 32 32 32 32 32 32 32 32 32 19 19 19 19 25 3 32 32 3 19 9,,False,False,0,False,unbalanced_parentheses
+25,COc1cccc(c()OC((C)c1cccccccc2),30,30,19 25 32 8 32 32 32 32 2 32 2 3 25 19 2 2 19 3 32 8 32 32 32 32 32 32 32 32 9 3,,False,False,0,False,unbalanced_parentheses

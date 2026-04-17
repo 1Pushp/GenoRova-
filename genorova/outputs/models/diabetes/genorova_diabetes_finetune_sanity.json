@@ -1,0 +1,53 @@
+[
+  {
+    "epoch": 1,
+    "validity_pct": 6.25,
+    "valid_count": 1,
+    "sample_count": 16,
+    "samples": [
+      "CN(Cc1ccc(F)cc1)C(=O)N1CCCC1",
+      "CC(Cc1cccc(Cc2ccc(C(=O)NCF)cccc1O)cc1",
+      "COC1CN(C(=O)N2C(C(=)NcH]]1COCC)H](Cc(=O)O)C2cOc]C",
+      "COc1cccc((CC)ccc(C()c)cc1C)",
+      "C=C[C[2H]C(C(C)C(=O)NCC)C1NC(C)C((OOC=O(CcC"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  },
+  {
+    "epoch": 5,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "CC(Cc1c[nH]cn1(C(=O)N1CCCC1",
+      "NCCCNC(N)C(=O)N1CC1C1",
+      "CC(C)[[CHH](N)C(=O)N1CCC[CH]1C#=O)C1",
+      "N[CH](C(=O)N1CCSC1)[CH]1CC[CH](NC(=O)(Nc2ccccc(c)c2)C)OF1",
+      "CCCC(=O)N1CCC(O)C1C)CC1"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  },
+  {
+    "epoch": 10,
+    "validity_pct": 12.5,
+    "valid_count": 2,
+    "sample_count": 16,
+    "samples": [
+      "CCC(C)[CH](N)C(=O)N1CCC[CH]1C#N",
+      "NCCC[H](NC(=O)OCc1cccc11)C(=O)N1",
+      "NCCC(N(C(=O)N1CCCCC1",
+      "CCOC(=O)c1cnc(CN)c2cc(OC)c(CCC)cC2ClCl=OCC)c(c)CC)CC1)C)C[C)H])OC",
+      "CCOC(=O)c1cnc(CNC=)O)c2cc(OC)c(1C)cc1"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  }
+]

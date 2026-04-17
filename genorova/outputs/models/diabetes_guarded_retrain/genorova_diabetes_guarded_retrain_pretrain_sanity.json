@@ -1,0 +1,92 @@
+[
+  {
+    "epoch": 1,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "CC(COC=C)c1c1cccOC(C1cCccccccc)c(c)cc1",
+      "CC1cncCc(C(C(=O)c2ccccccccCc)c)C1Cc2",
+      "O=C(CC1=c)c1cccccCcC1C(C1c2CcC1CcC1C1C21)",
+      "Cc1ncc(C(CCNC(=O)NCcccccccc3)ccnc1c2Cc1c1n)c1C1OCl2o-FnOn[BSCN(r3sFSH5SHo-#BH-oro(#H54NnCl4NB)OBSHo-Fr-CF5Hosnc3)H(H5])",
+      "O=C(NC1Cc)c1Cc(cCC)C1c(Cc1ccccccc2cC1)C1C1c1Cc11Cl([s3o)s]B-r=BH-F3CcHcNFSFSF4lS[=no-Hr2]c#HOFcs5CS4#o-#Onsnr-#rS4H=o4#"
+    ],
+    "termination_reasons": {
+      "eos": 9,
+      "max_length": 7
+    },
+    "missing_eos_count": 7
+  },
+  {
+    "epoch": 5,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "Nc1c1cnc(c1CC(CO)Ccccccc2C)c1121",
+      "COc1ccc(C(c(C(=O)N2CcC(cc(c)c1cC)c1C)1C1c11c1C11Cl2Nr3[ncnC5(#sH3F2FONO5)BrS1cr-H-n2-rO-conH=n)(nHF-#rlN-OFn4ocrFHN1]4)",
+      "CC1Cc(C(=O)N1CCC(C(=O)CCCCCC)C1C1C1CO11C1c1)C1",
+      "Cc1cC(CC)CCNCCCOccC2(C(=O)C(C)Cc1C1C1C1C1c1OCnH11C2o=r2)o[cHsNcOF(][FN=FoSr=lH=l=C2O4rO=#BrCHsr(rHC-so]CF=sSBFr)1nCl4)#",
+      "O=C(CC1c1ccccc1)c1cc2ccC2c1c1"
+    ],
+    "termination_reasons": {
+      "eos": 10,
+      "max_length": 6
+    },
+    "missing_eos_count": 6
+  },
+  {
+    "epoch": 10,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "COc1cc(CNC(=O)NCCC(CCcC2C)cc(C)c121cC11C1C1c11111l2Nr3[CnHBoONl-CF3s)s(H4N=n]FoScrn2N3[=OBcCHBr]SO4Nsrso5n5cH4=[F4NH]3F",
+      "Cc1ccnclcccccc(BO)cc1",
+      "CC(C)(C)OC(=O)N1CCNC(=C)c2ccc(C)cC2CC1",
+      "Cc1cccc2(CC(Cc2cc3c)(=F)C1COC)c1c1C1Cc1C1C1c1O1C1C2o=Nl1=lsoO(c)-l2CcH=Co=NF#SHS2H(nSl2#[SC3o#oHoH]Fs[r-ns=nHc=BH2rn)l2",
+      "CC(NC(=O)c1cccc(c#Nc1c(c2ccccc(c1)cCn1Cc1c1)CO21CC2NrBNrn#CB2COH#o3)H-s#=SFNFCs=-=BF(#OHl(rCS)Ho1CF1slrFl)o[cFncB1=n]3s"
+    ],
+    "termination_reasons": {
+      "eos": 9,
+      "max_length": 7
+    },
+    "missing_eos_count": 7
+  },
+  {
+    "epoch": 15,
+    "validity_pct": 6.25,
+    "valid_count": 1,
+    "sample_count": 16,
+    "samples": [
+      "CC(C)C(C)C#C(C(=O)Cccccccc1c1CCC1C1OC1C11(C)C1=O1l2N1ONO1-cHS)=c-FN2OBO2FSCB-noHN[=F1sON-#=Hsl=#nH4COl#O]BN[Ho4NoHHC#c2",
+      "CCCC(=O(Nc2cccc(CC)=O)Cc2cC(C))C1C1",
+      "COC(=O)CNCCCN(N(C=O)cc2ccc(C))ccC1C1NCc11F1CO1O11l2",
+      "Cc1cc(C(=O)NC)CC=OCc2cccc(C)#C2c=O1",
+      "COc1cc(CNC(=O)COC2c2ccc(C))c1O"
+    ],
+    "termination_reasons": {
+      "eos": 11,
+      "max_length": 5
+    },
+    "missing_eos_count": 5
+  },
+  {
+    "epoch": 20,
+    "validity_pct": 12.5,
+    "valid_count": 2,
+    "sample_count": 16,
+    "samples": [
+      "Cc1ccccc1C1CC(COCc2ccccc2Cl)CC1",
+      "O=C(Nc1ccc(c1)c1ccc(Cc2cccn2)nc1)CC11",
+      "N#Cc1cccc(NC(=O)NCcCCCOc2cccc2)c2cC1c1C11c1OO121",
+      "CCCC(Cn(cc2ccc(c(C)c2cccc=O)[nH]c1=O1c1C)c1(=O)CCC2(B-F)c#F1oslc1)3rHB-NnSB#c2HonN2H-Hn=lcoSnlBH#lCl3-NS5co5H-oH=lHnrl#",
+      "CC(CC(=O)Ccccccc(C)c1)ccccccS(C(CCOc=O)c1)=O"
+    ],
+    "termination_reasons": {
+      "eos": 14,
+      "max_length": 2
+    },
+    "missing_eos_count": 2
+  }
+]

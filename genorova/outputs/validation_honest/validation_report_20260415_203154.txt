@@ -1,0 +1,81 @@
+================================================================================
+GENOROVA AI — VALIDATION REPORT
+================================================================================
+
+Validation Run: 20260415_203154
+Total molecules validated: 10
+Status: {'FAIL': 10}
+Recommendation: {'REJECT': 10}
+
+TOP 10 CANDIDATES:
+--------------------------------------------------------------------------------
+
+#1 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcc(ccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#2 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcc(cccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#3 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcc(cccccccCcccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#4 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcccccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#5 | Clinical Score: 0.150 | REJECT
+    SMILES: CCC1ccccccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#6 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCccccccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#7 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcc(ccccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#8 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcccccccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#9 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcc(cccccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN
+
+#10 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCccccccccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run
+    MW: N/A | QED: N/A | SA: N/A
+    Toxicity: UNKNOWN

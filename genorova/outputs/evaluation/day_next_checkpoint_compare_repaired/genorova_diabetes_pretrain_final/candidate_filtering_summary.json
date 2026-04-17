@@ -1,0 +1,69 @@
+{
+  "thresholds": {
+    "qed_min": 0.5,
+    "sa_max": 6.0,
+    "mw_min": 150.0,
+    "mw_max": 500.0,
+    "logp_min": -1.0,
+    "logp_max": 5.0,
+    "require_lipinski": true
+  },
+  "unique_valid_candidates": 4,
+  "filtered_candidate_count": 4,
+  "filtered_candidate_pct_of_unique_valid": 100.0,
+  "rejection_reason_counts": {},
+  "top_filtered_candidates": [
+    {
+      "canonical_smiles": "COc1ccc(NS(=O)(=O)c2ccc(C)cc2)cc1",
+      "clinical_score": 0.9183,
+      "qed_score": 0.9346,
+      "sa_score": 1.4569,
+      "molecular_weight": 277.34,
+      "logp": 2.804,
+      "tpsa": 55.4,
+      "passes_lipinski": true,
+      "is_novel_vs_reference": true,
+      "filter_status": "filtered_in",
+      "filter_reason": "passed_all_filters"
+    },
+    {
+      "canonical_smiles": "CCOC(=O)Cc1ccc(NCc2ccc(F)cn2)cn1",
+      "clinical_score": 0.8633,
+      "qed_score": 0.8269,
+      "sa_score": 2.2435,
+      "molecular_weight": 289.31,
+      "logp": 2.333,
+      "tpsa": 64.11,
+      "passes_lipinski": true,
+      "is_novel_vs_reference": true,
+      "filter_status": "filtered_in",
+      "filter_reason": "passed_all_filters"
+    },
+    {
+      "canonical_smiles": "CCCCc1cccc(NC(=O)c2ccccc2)c1C#N",
+      "clinical_score": 0.8375,
+      "qed_score": 0.8927,
+      "sa_score": 1.8737,
+      "molecular_weight": 278.36,
+      "logp": 4.153,
+      "tpsa": 52.89,
+      "passes_lipinski": true,
+      "is_novel_vs_reference": true,
+      "filter_status": "filtered_in",
+      "filter_reason": "passed_all_filters"
+    },
+    {
+      "canonical_smiles": "Cc1cc(N)ccc1CCCOCc1ccccn1",
+      "clinical_score": 0.7693,
+      "qed_score": 0.6378,
+      "sa_score": 2.0877,
+      "molecular_weight": 256.35,
+      "logp": 3.122,
+      "tpsa": 48.14,
+      "passes_lipinski": true,
+      "is_novel_vs_reference": true,
+      "filter_status": "filtered_in",
+      "filter_reason": "passed_all_filters"
+    }
+  ]
+}

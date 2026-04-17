@@ -1,0 +1,56 @@
+[
+  {
+    "epoch": 1,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "CNOC(=O)CcC1cccC(-cc1cccH)Nc(O)Cc(CO(c=cO1)CO)CcCc(cOCcC)cCCcC1",
+      "C=C1CN(C(=O)N1CCC(C)[C(H](CO[CHc](Nc(=O)c(C)cCcOc(cCcC)C)1Cc1COCC)C1HO(C)C)CHO)O[C1C(])",
+      "CC(N)(CO)c1HC(C)C(=O)C1CCC(C)COC=c2=cCc1cnCcC1O2",
+      "CCOC(=O)c1cnc(=N)c2ccc(C)NccCONcc2Cc(N=C)CCCC2O2cC2cCcCcCc2CcCcC[CCc=O(C)CCOC1C2=CCC1COC1(rNO#S-n4(sOs]s-Cn4sN-r5B)2O5#",
+      "N=C(ON(C)C(=O)Nc1)C1CNC(=O)(=O)c1c2ccc1FCc1CC1COcCccCcCCcCcCO1cC2CCc=CCC[CC=COCOCC=c1C2C(]3(OH)CBS#HBrHsnsBHNBH3#l)Fs2c"
+    ],
+    "termination_reasons": {
+      "eos": 11,
+      "max_length": 5
+    },
+    "missing_eos_count": 5
+  },
+  {
+    "epoch": 5,
+    "validity_pct": 6.25,
+    "valid_count": 1,
+    "sample_count": 16,
+    "samples": [
+      "CN(=OC(=O)O11ccc(SS=O)(=O(NOC)H(ccC[CHH](c[cH](N)C(=O)N3CCCC3)CC2)cc12C(C)C[C1C]C1HC(OCCHC12O21CO)O1cs4s=-c4-cONF[=s)])",
+      "N[C1H](C(=O)N1CCSC1)[C(H]1CC[C(H](NC(=O)c2c2c(ccc(c)2(F)C1F)Cc1)C)1)cc2CC1",
+      "NCCCHC(N)C(=O)N1CCCC1",
+      "C[CC1H](Cc[ccH]c1)C(=O)N1CCCC1",
+      "N[CNH](N)C(=O)N1CCCC1"
+    ],
+    "termination_reasons": {
+      "eos": 13,
+      "max_length": 3
+    },
+    "missing_eos_count": 3
+  },
+  {
+    "epoch": 10,
+    "validity_pct": 6.25,
+    "valid_count": 1,
+    "sample_count": 16,
+    "samples": [
+      "O=C([C1CH]1OC(=O)N1CCC1C1)Cc1CO",
+      "CC(C)(N)C(=O)N1CCS[CHH]1BCC",
+      "CN(C)C(=O)Oc1ccc(S(=O)(=O)N[C-H]2CC[CHH]([C1H](N)C(=O)N3CCSC3)CC2)cc1[C(CO)OH1C2C1H](O)C[C1O]21CO1O1CF1s#sH(HcOnN[=O)l]",
+      "N[CNH](C(=O)N1CCCC1)",
+      "N[C1H](C(=O)N1CCSC1)[C(H]1CC[CCH](NC(=O)O2c2cc3cc2ccc2)C)1C1C1C1FC11cc2CC1CCO2[C3(]C2CO)C[C(=O)C2-O1#Fn5-B2BOScCSBSH5H-"
+    ],
+    "termination_reasons": {
+      "eos": 12,
+      "max_length": 4
+    },
+    "missing_eos_count": 4
+  }
+]

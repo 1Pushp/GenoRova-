@@ -1,0 +1,39 @@
+{
+  "empty_string_count": 0,
+  "eos_terminated_count": 100,
+  "pad_terminated_count": 0,
+  "missing_bos_count": 0,
+  "missing_eos_count": 0,
+  "invalid_reason_counts": {
+    "unbalanced_parentheses": 69,
+    "ring_closure_mismatch": 19,
+    "unbalanced_brackets": 7,
+    "long_repetitive_fragment": 4,
+    "rdkit_parse_failure": 1
+  },
+  "top_decoded_tokens": {
+    "c": 1066,
+    "C": 694,
+    "(": 382,
+    ")": 376,
+    "1": 281,
+    "O": 219,
+    "=": 170,
+    "N": 132,
+    "2": 130,
+    "n": 51
+  },
+  "latent_debug": {
+    "latent_source": "guided",
+    "anchor_count": 50000,
+    "anchor_mu_std": 0.730007,
+    "anchor_mu_mean_abs": 0.574966,
+    "temperature": 0.3
+  },
+  "special_token_ids": {
+    "pad": 0,
+    "bos": 1,
+    "eos": 2,
+    "unk": 3
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "empty_string_count": 0,
+  "invalid_reason_counts": {
+    "unbalanced_parentheses": 14,
+    "low_character_diversity": 6,
+    "ring_closure_mismatch": 5
+  },
+  "top_decoded_tokens": {
+    "c": 465,
+    "C": 123,
+    ")": 13,
+    "1": 5,
+    "(": 1
+  },
+  "latent_debug": {
+    "latent_source": "guided",
+    "anchor_count": 1000,
+    "anchor_mu_std": 0.579719,
+    "anchor_mu_mean_abs": 0.443929,
+    "temperature": 0.3
+  }
+}

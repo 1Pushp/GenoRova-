@@ -1,0 +1,87 @@
+[
+  {
+    "epoch": 1,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "O=C(CCc1cccn-ccccccc1(1)cCc1c2c1",
+      "O=C(Ccc1cc1c)c1C)NCC)1O)ccccccc1",
+      "Cc1cccccc(C(=O)N)C(CC(O)O)CCOC(C)CCC)C1",
+      "COS(=OC(=O)N1CCC(C(=O)NCC)cC(C)CC",
+      "CC(C)CC)=O)CC)C(=O)c1ccc(clcc1c"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  },
+  {
+    "epoch": 5,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "O=C(COc1ccc2ccccc1))N)CCOCC1CC)(1",
+      "CC(C(1ccnc-c2ccccc2)NC1)NCc2cccc1",
+      "COc1ccc(C2)Cc(C(=O)NCCCCC)c(C2)c1",
+      "C1ncc(CC2CCCC(C3CCCn(Cn3ccncc)C2))C1",
+      "Cc1nc(C)c(C(=O)NC3ncccncccc(C)CcC4)Cc)2)1n"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  },
+  {
+    "epoch": 10,
+    "validity_pct": 6.25,
+    "valid_count": 1,
+    "sample_count": 16,
+    "samples": [
+      "CN(C)C(=O)Nc1ccc(S(=O)(=O)C2C)c)c2)cc1",
+      "Cc1ccnc(CC(=O)C(CC(=O)c3cccc(C)c=O)[3H]cn1O",
+      "O=C(c1ccccC1)C1CCNC1)CC)c1cccc12",
+      "COCc1c(=c)cc1C(cc2ccc3c)cn2C",
+      "CC(Cc1c1nc-c2ccc(c1)c(C)NCc2ccncc1"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  },
+  {
+    "epoch": 15,
+    "validity_pct": 0.0,
+    "valid_count": 0,
+    "sample_count": 16,
+    "samples": [
+      "CC(NC(=O)N1cCNcc1ccc(C)cc1))C1C",
+      "CC(C)C(=O)cc1cccNS(=O)(=O)C(C)C)C2)cC1",
+      "CC(CO)c1ccc(C(O)NOC(=O)NCcCc1)c11",
+      "CC(C)Cc1cnc(NC(=O)NCCCCCCCC(C)CCCO1)s1",
+      "COc1ccccc1OC(#C)NS(=O)(=O)c1ccccc21"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  },
+  {
+    "epoch": 20,
+    "validity_pct": 6.25,
+    "valid_count": 1,
+    "sample_count": 16,
+    "samples": [
+      "Cc1cccc(C(=O)NCC2n2c(c2)cccs3)c1",
+      "CC(=O)Nc1ccc(NCC(=O)c2ccc(C)ccc2C)cc1",
+      "CC(=O)c1cccc(NC(=O)Cc2cnc3c3c2)Cc23)c1",
+      "CCS(=O)(=O)N1CCN(C(=O)N1C)CCO)C11",
+      "Nc1cnnc(Sc2ccccc2Br)Nc1C"
+    ],
+    "termination_reasons": {
+      "eos": 16
+    },
+    "missing_eos_count": 0
+  }
+]

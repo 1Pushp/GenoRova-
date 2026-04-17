@@ -1,0 +1,92 @@
+{
+  "empty_string_count": 0,
+  "empty_string_pct": 0.0,
+  "eos_terminated_count": 100,
+  "pad_terminated_count": 0,
+  "missing_bos_count": 0,
+  "missing_eos_count": 0,
+  "invalid_reason_counts": {
+    "unbalanced_parentheses": 43,
+    "long_repetitive_fragment": 5,
+    "ring_closure_mismatch": 4,
+    "rdkit_parse_failure": 4,
+    "unbalanced_brackets": 1
+  },
+  "invalidity_breakdown": {
+    "invalid_total": 57,
+    "invalid_reason_counts": {
+      "unbalanced_parentheses": 43,
+      "long_repetitive_fragment": 5,
+      "ring_closure_mismatch": 4,
+      "rdkit_parse_failure": 4,
+      "unbalanced_brackets": 1
+    },
+    "invalid_reason_percentages": {
+      "unbalanced_parentheses": 75.44,
+      "long_repetitive_fragment": 8.77,
+      "ring_closure_mismatch": 7.02,
+      "rdkit_parse_failure": 7.02,
+      "unbalanced_brackets": 1.75
+    },
+    "average_invalid_length": 24.7018,
+    "median_invalid_length": 24.0,
+    "common_invalid_endings": {
+      ")cc1": 7,
+      "1CC1": 7,
+      "c1Cl": 7,
+      "ccc1": 7,
+      "CCC1": 3,
+      "cc21": 3,
+      "cc1C": 2,
+      "c2s1": 2,
+      "N)=O": 2,
+      "cc1F": 1
+    },
+    "common_invalid_last_tokens": {
+      "1": 38,
+      "l": 7,
+      "C": 5,
+      "O": 3,
+      "2": 3,
+      "F": 1
+    },
+    "mean_invalid_length_by_reason": {
+      "long_repetitive_fragment": 29.8,
+      "rdkit_parse_failure": 28.25,
+      "ring_closure_mismatch": 33.25,
+      "unbalanced_brackets": 24.0,
+      "unbalanced_parentheses": 23.0
+    },
+    "structural_residual_counts": {
+      "nonzero_parenthesis_balance": 1,
+      "nonzero_bracket_balance": 0,
+      "nonzero_unmatched_ring_count": 36
+    }
+  },
+  "top_decoded_tokens": {
+    "c": 749,
+    "C": 519,
+    "1": 300,
+    ")": 259,
+    "(": 210,
+    "2": 133,
+    "O": 121,
+    "N": 94,
+    "=": 78,
+    "n": 60
+  },
+  "latent_debug": {
+    "latent_source": "random",
+    "latent_std": 0.99785,
+    "top_k": 5,
+    "repetition_penalty": 0.75,
+    "structural_guard_strength": 1.0,
+    "min_generation_length": 20
+  },
+  "special_token_ids": {
+    "pad": 0,
+    "bos": 1,
+    "eos": 2,
+    "unk": 3
+  }
+}

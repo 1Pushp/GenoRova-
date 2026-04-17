@@ -36,6 +36,17 @@ The suite is intentionally small and fast:
 - no GPU dependency
 - minimal mocking around expensive or unstable paths
 
+## Operations
+
+For demo-safe deployment checks and recovery steps, use:
+
+```bash
+python scripts/smoke_check.py
+python scripts/runtime_backup.py backup
+```
+
+Operational guidance, degraded-state interpretation, and deploy checklists live in `OPERATIONS_RUNBOOK.md`.
+
 ## Generation Evaluation
 
 Day 4 adds a generation-quality evaluator for trained VAE checkpoints. It

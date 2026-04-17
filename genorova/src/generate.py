@@ -68,6 +68,7 @@ BATCH_SIZE = 50
 TOP_K = 5
 REPETITION_PENALTY = 0.75
 STRUCTURAL_GUARD_STRENGTH = 1.0
+AR_MIN_GENERATION_LENGTH = 20
 
 # Validation thresholds
 VALIDITY_THRESHOLD = 0.85
@@ -119,17 +120,32 @@ def _load_checkpoint_state(checkpoint_path: Path, device: torch.device) -> dict[
     return checkpoint
 
 
-def _candidate_vocab_paths() -> list[Path]:
+def _candidate_vocab_paths(checkpoint_path: Path | None = None) -> list[Path]:
     """Return likely vocabulary files for runtime generation."""
-    return [
+    candidates = [
+        PROJECT_ROOT / "outputs" / "vocab_ar.json",
         PROJECT_ROOT / "outputs" / "vocabulary_diabetes_pretrain.json",
         PROJECT_ROOT / "outputs" / "vocabulary_diabetes.json",
         PROJECT_ROOT / "outputs" / "vocabulary_infection.json",
+        PROJECT_ROOT / "outputs" / "models" / "ar" / "vocab.json",
         PROJECT_ROOT / "outputs" / "vocab.json",
         PROJECT_ROOT / "outputs" / "vocabulary.json",
         Path("outputs/vocab.json"),
         Path("outputs/vocabulary.json"),
     ]
+    if checkpoint_path is not None:
+        candidates.extend(sorted(checkpoint_path.parent.glob("vocab*.json")))
+        candidates.extend(sorted(checkpoint_path.parent.parent.glob("vocab*.json")))
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
 
 
 def _vocab_size_from_checkpoint(checkpoint: dict[str, Any]) -> int:
@@ -147,13 +163,30 @@ def _resolve_vocab_path(checkpoint_path: Path, checkpoint: dict[str, Any]) -> Pa
     target_vocab_size = _vocab_size_from_checkpoint(checkpoint)
     disease = str(checkpoint.get("disease") or "").lower()
     stage_name = str(checkpoint.get("stage_name") or "").lower()
+    model_type = str(checkpoint.get("model_type") or "").lower()
+
+    declared_vocab = checkpoint.get("vocab_path")
+    if declared_vocab:
+        declared_path = Path(str(declared_vocab))
+        candidate_paths = []
+        if declared_path.is_absolute():
+            candidate_paths.append(declared_path)
+        candidate_paths.append(checkpoint_path.parent / declared_path)
+        candidate_paths.append(PROJECT_ROOT / declared_path)
+        candidate_paths.append(PROJECT_ROOT / "outputs" / declared_path.name)
+        for candidate in candidate_paths:
+            if not candidate.exists():
+                continue
+            char2idx, _ = load_vocab(str(candidate))
+            if len(char2idx) == target_vocab_size:
+                return candidate
 
     candidates = []
-    for path in _candidate_vocab_paths():
+    for path in _candidate_vocab_paths(checkpoint_path):
         if not path.exists():
             continue
         try:
-            char2idx, _ = load_vocab(path)
+            char2idx, _ = load_vocab(str(path))
         except Exception:
             continue
         if len(char2idx) != target_vocab_size:
@@ -167,6 +200,10 @@ def _resolve_vocab_path(checkpoint_path: Path, checkpoint: dict[str, Any]) -> Pa
             score += 2
         if "pretrain" in path_name and stage_name == "pretrain":
             score += 2
+        if "vocab_ar" in path_name and model_type == "smilesvae_ar":
+            score += 4
+        if "models/ar" in str(path).replace("\\", "/").lower() and model_type == "smilesvae_ar":
+            score += 3
         if "vocab" == path.stem.lower():
             score += 1
         candidates.append((score, path))
@@ -216,7 +253,7 @@ class MoleculeGenerator:
 
         # Load vocabulary with checkpoint-aware resolution to avoid silent mismatch.
         vocab_path = _resolve_vocab_path(Path(checkpoint_path), self.checkpoint)
-        self.char2idx, self.idx2char = load_vocab(vocab_path)
+        self.char2idx, self.idx2char = load_vocab(str(vocab_path))
         vocab_size = len(self.char2idx)
 
         # Auto-detect model dimensions from checkpoint
@@ -479,23 +516,284 @@ class MoleculeGenerator:
 
 
 # ============================================================================
+# AUTOREGRESSIVE MOLECULE GENERATOR
+# ============================================================================
+
+class ARMoleculeGenerator:
+    """
+    Generate molecules from a trained SMILESVAE (autoregressive decoder).
+
+    This class is the generation-time counterpart of train_ar.py.  It loads
+    a checkpoint saved by train_ar.py (model_type="SMILESVAE_AR"), runs
+    token-by-token autoregressive decoding, validates with RDKit, and saves
+    results to a CSV.
+
+    Usage:
+        gen = ARMoleculeGenerator(
+            checkpoint_path="outputs/models/ar/smilesvae_ar_best.pt",
+            device="cpu",
+        )
+        df = gen.generate_molecules(num_to_generate=500)
+        gen.save_results(df, "ar_candidates.csv")
+    """
+
+    def __init__(self, checkpoint_path: str = None, device: str = "cpu"):
+        """
+        Load a SMILESVAE_AR checkpoint and prepare for generation.
+
+        Args:
+            checkpoint_path : path to checkpoint saved by train_ar.py.
+                              Defaults to outputs/models/ar/smilesvae_ar_best.pt.
+            device          : "cpu" or "cuda"
+        """
+        from model_ar import SMILESVAE
+
+        print(f"\n{'='*70}")
+        print(f"GENOROVA AR MOLECULE GENERATOR")
+        print(f"{'='*70}")
+
+        self.device = torch.device(device)
+
+        # Default checkpoint location for AR model
+        if checkpoint_path is None:
+            checkpoint_path = (
+                PROJECT_ROOT / "outputs" / "models" / "ar" / "smilesvae_ar_best.pt"
+            )
+
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(
+                f"AR checkpoint not found: {checkpoint_path}\n"
+                "Train the autoregressive model first:  python train_ar.py"
+            )
+
+        print(f"\n[*] Loading checkpoint: {checkpoint_path}")
+        ckpt = torch.load(checkpoint_path, map_location=self.device)
+
+        if ckpt.get("model_type") != SMILESVAE.MODEL_TYPE:
+            raise ValueError(
+                f"Expected model_type='SMILESVAE_AR', "
+                f"got {ckpt.get('model_type')!r}. "
+                "Use MoleculeGenerator for old VAE checkpoints."
+            )
+
+        # Resolve vocabulary file (AR training saves to vocab_ar.json)
+        vocab_path = _resolve_vocab_path(checkpoint_path, ckpt)
+        self.char2idx, self.idx2char = load_vocab(str(vocab_path))
+        vocab_size = len(self.char2idx)
+
+        # Infer model dimensions from checkpoint
+        inferred_vocab  = _vocab_size_from_checkpoint(ckpt)
+        inferred_maxlen = int(ckpt.get("max_length") or MAX_SMILES_LENGTH)
+        state_dict = ckpt["model_state"]
+        if ckpt.get("hidden_dim") is not None:
+            hidden_dim = int(ckpt["hidden_dim"])
+            num_gru_layers = int(ckpt["num_gru_layers"])
+            embed_dim = int(ckpt["embed_dim"])
+        else:
+            embed_dim = int(state_dict["decoder.embed.weight"].shape[1])
+            hidden_dim = int(state_dict["decoder.gru.weight_hh_l0"].shape[1])
+            num_gru_layers = sum(
+                1 for key in state_dict if key.startswith("decoder.gru.weight_hh_l")
+            )
+
+        if vocab_size != inferred_vocab:
+            raise ValueError(
+                f"Vocabulary mismatch: checkpoint expects {inferred_vocab} tokens "
+                f"but {vocab_path} has {vocab_size}."
+            )
+
+        print(f"    Vocabulary size  : {vocab_size}")
+        print(f"    Vocabulary file  : {vocab_path}")
+        print(f"    Max sequence len : {inferred_maxlen}")
+        print(f"    Epoch trained    : {ckpt.get('epoch', '?')}")
+        print(f"    Best val loss    : {ckpt.get('best_val_loss', float('nan')):.4f}")
+        print(f"    Min gen length   : {ckpt.get('min_generation_length', AR_MIN_GENERATION_LENGTH)}")
+
+        self.model = SMILESVAE(
+            vocab_size=vocab_size,
+            max_length=inferred_maxlen,
+            hidden_dim=hidden_dim,
+            num_gru_layers=num_gru_layers,
+            embed_dim=embed_dim,
+        ).to(self.device)
+        self.model.set_special_tokens(self.char2idx)
+        self.model.load_state_dict(ckpt["model_state"])
+        self.model.eval()
+
+        print(f"    Parameters       : {self.model.count_parameters():,}")
+
+        # Statistics
+        self.valid_count   = 0
+        self.novel_count   = 0
+        self.invalid_count = 0
+
+    # ------------------------------------------------------------------
+    # SMILES validation (shared with MoleculeGenerator above)
+    # ------------------------------------------------------------------
+
+    def validate_smiles(self, smiles: str):
+        """Validate a SMILES string and return (is_valid, properties)."""
+        try:
+            from rdkit import Chem as _Chem
+            from rdkit.Chem import Descriptors as _Desc, Crippen as _Cr, QED as _QED
+            mol = _Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return False, {}
+            mw   = _Desc.MolWt(mol)
+            logp = _Cr.MolLogP(mol)
+            hbd  = _Desc.NumHDonors(mol)
+            hba  = _Desc.NumHAcceptors(mol)
+            try:
+                qed = _QED.qed(mol)
+            except Exception:
+                qed = 0.0
+            props = {"mw": float(mw), "logp": float(logp),
+                     "hbd": int(hbd), "hba": int(hba), "qed": float(qed)}
+            passes = (mw <= MAX_MOLECULAR_WEIGHT and logp <= MAX_LOGP
+                      and hbd <= MAX_H_DONORS and hba <= MAX_H_ACCEPTORS)
+            return passes and qed >= MIN_QED_SCORE, props
+        except Exception:
+            return False, {}
+
+    # ------------------------------------------------------------------
+    # Generation
+    # ------------------------------------------------------------------
+
+    def generate_molecules(
+        self,
+        num_to_generate: int = 100,
+        temperature: float = 1.0,
+        top_k: int = 5,
+        batch_size: int = 50,
+        min_generation_length: int = AR_MIN_GENERATION_LENGTH,
+    ) -> pd.DataFrame:
+        """
+        Generate molecules autoregressively from the trained SMILESVAE.
+
+        Molecules are generated in batches of `batch_size`, validated with
+        RDKit and Lipinski filters, and returned as a DataFrame.
+
+        Args:
+            num_to_generate : total molecules to attempt
+            temperature     : sampling temperature (higher = more diverse)
+            top_k           : restrict sampling to top-k tokens per step
+            batch_size      : generation batch size
+            min_generation_length : minimum number of generated tokens before
+                                    EOS can terminate the sequence
+
+        Returns:
+            DataFrame with columns: smiles, mw, logp, hbd, hba, qed
+        """
+        print(f"\n[*] AR generation: {num_to_generate} molecules")
+        print(f"    Temperature : {temperature}  top_k : {top_k}")
+        print(f"    Batch size  : {batch_size}")
+        print(f"    Min length  : {min_generation_length}")
+
+        special  = get_special_token_ids(self.char2idx)
+        bos_idx  = special["bos"] if special["bos"] is not None else 1
+        eos_idx  = special["eos"] if special["eos"] is not None else 2
+        pad_idx  = special["pad"] if special["pad"] is not None else 0
+
+        all_smiles = []
+        all_props  = []
+        n_batches  = (num_to_generate + batch_size - 1) // batch_size
+
+        for b in tqdm(range(n_batches), desc="AR generating"):
+            n = min(batch_size, num_to_generate - b * batch_size)
+
+            with torch.no_grad():
+                token_ids = self.model.generate(
+                    num_molecules=n,
+                    bos_idx=bos_idx,
+                    eos_idx=eos_idx,
+                    pad_idx=pad_idx,
+                    temperature=temperature,
+                    top_k=top_k,
+                    min_generation_length=min_generation_length,
+                    device=self.device,
+                )
+
+            for seq in token_ids:
+                row    = decode_token_ids(seq, self.idx2char, char2idx=self.char2idx)
+                smiles = row["raw_smiles"]
+                if not smiles:
+                    self.invalid_count += 1
+                    continue
+                valid, props = self.validate_smiles(smiles)
+                if valid:
+                    self.valid_count += 1
+                    all_smiles.append(smiles)
+                    all_props.append(props)
+                else:
+                    self.invalid_count += 1
+
+        print(f"\n[*] AR Generation Complete")
+        print(f"    Valid   : {self.valid_count}")
+        print(f"    Invalid : {self.invalid_count}")
+        if num_to_generate > 0:
+            print(f"    Validity: {100*self.valid_count/num_to_generate:.1f}%")
+
+        if all_smiles:
+            print(f"\n[*] First 5 generated:")
+            for i, (s, p) in enumerate(zip(all_smiles[:5], all_props[:5])):
+                print(f"    {i+1}. {s:<40}  MW={p['mw']:.1f}  QED={p['qed']:.3f}")
+
+        if all_smiles:
+            return pd.DataFrame({
+                "smiles": all_smiles,
+                "mw":     [p["mw"]   for p in all_props],
+                "logp":   [p["logp"] for p in all_props],
+                "hbd":    [p["hbd"]  for p in all_props],
+                "hba":    [p["hba"]  for p in all_props],
+                "qed":    [p["qed"]  for p in all_props],
+            })
+        return pd.DataFrame(columns=["smiles", "mw", "logp", "hbd", "hba", "qed"])
+
+    def save_results(self, df: pd.DataFrame, filename: str = "ar_generated.csv"):
+        """Save generated molecules to CSV."""
+        out = GENERATE_OUTPUT_DIR / filename
+        df.to_csv(out, index=False)
+        print(f"\n[OK] Saved {len(df)} molecules to: {out}")
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
 def main():
-    """Generate molecules from trained VAE."""
-    
+    """Generate molecules from trained VAE (original parallel decoder)."""
+
     generator = MoleculeGenerator(device="cpu")
-    
+
     print(f"\n[*] Starting generation...")
     results = generator.generate_molecules(num_to_generate=100)
-    
+
     generator.save_results(results)
-    
+
     print(f"\n{'='*70}")
     print(f"GENERATION COMPLETE")
     print(f"{'='*70}\n")
 
 
+def main_ar():
+    """Generate molecules from trained SMILESVAE (autoregressive decoder)."""
+
+    generator = ARMoleculeGenerator(device="cpu")
+
+    print(f"\n[*] Starting AR generation...")
+    results = generator.generate_molecules(num_to_generate=100)
+
+    generator.save_results(results, filename="ar_generated.csv")
+
+    print(f"\n{'='*70}")
+    print(f"AR GENERATION COMPLETE")
+    print(f"{'='*70}\n")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--ar" in sys.argv:
+        main_ar()
+    else:
+        main()

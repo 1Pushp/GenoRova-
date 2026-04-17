@@ -1,0 +1,16 @@
+================================================================================
+GENOROVA AI — VALIDATION REPORT
+================================================================================
+
+Validation Run: 20260415_203126
+Total molecules validated: 10
+Status: {'FAIL': 10}
+Recommendation: {'REJECT': 10}
+
+TOP 10 CANDIDATES:
+--------------------------------------------------------------------------------
+
+#1 | Clinical Score: 0.150 | REJECT
+    SMILES: CCCCcc(ccccccccccccccccccc
+    Heuristic binding proxy: -4.00 (not docking)
+    Real docking: not run

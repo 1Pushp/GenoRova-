@@ -1,87 +1,99 @@
 # Demo Script
 
-## 60-90 Second Demo Flow
+## External Demo Goal
 
-1. Open Genorova chat and state the framing clearly.
-2. Score a known molecule to show structured computational analysis.
-3. Ask Genorova to explain the molecule simply.
-4. Compare it with another molecule or with the current best ranked molecule.
-5. If asked about generation, show the honest fallback behavior and explain that fresh generation quality is still being improved.
+Show GenorovaAI as a prototype computational research-support platform with a
+protected workspace, evidence-weighted ranking, and explicit scientific
+limitations.
 
-## Short Demo Disclaimer
+## 3-5 Minute Demo Flow
 
-"Genorova is currently a prototype computational research-support system. The strongest part of the product today is scoring, explanation, comparison, and responsible scientific framing. It is not experimentally validated, and fresh molecule generation is still under active improvement."
+1. Open the login screen and say the framing clearly.
+2. Sign in and land on the guided workspace.
+3. Run the recommended ranked-candidate prompt.
+4. Pause on the candidate card and validation ledger.
+5. Ask for a plain-language explanation of the best molecule.
+6. Show one follow-up optimization or comparison step.
+7. Close with the trust statement and generation limitation.
 
-## Exact Prompts To Type
+## Short Spoken Framing
 
-### Prompt 1: Score
+"GenorovaAI is a prototype computational research-support platform. The
+strongest workflows today are scoring, explanation, comparison, ranking, and
+trust-aware workspace guidance. Outputs are evidence-weighted computational,
+heuristic, and proxy signals only. They are not experimental proof or clinical
+validation."
+
+## Safe Prompt Sequence
+
+Prompt 1:
+
+`Show the top computational candidates in the active diabetes workflow`
+
+What to say:
+- "This is the safest opening because it shows the ranked candidate set and the validation ledger immediately."
+
+Prompt 2:
+
+`Explain the best molecule simply`
+
+What to say:
+- "Now the product turns a structured computational result into a plain-language explanation."
+
+Prompt 3:
+
+`Optimize the best molecule for oral delivery`
+
+What to say:
+- "This shows comparator-based decision support and follow-up reasoning, not proof of a better drug."
+
+Prompt 4:
 
 `Score this molecule: CCO`
 
 What to say:
-- "This shows the structured property and model-score layer."
-
-### Prompt 2: Explain
-
-`Explain this molecule simply`
-
-What to say:
-- "The chat layer can translate computational output into more accessible language."
-
-### Prompt 3: Compare
-
-`Compare it with the best one`
-
-What to say:
-- "This is the safest high-value workflow today: compare and reason about known valid molecules."
-
-### Prompt 4: Optimize
-
-`Make it less toxic`
-
-What to say:
-- "Genorova can suggest follow-up thinking and tradeoffs, while still staying explicit about limitations."
+- "This is a simple known-molecule scoring example that makes the trust framing easy to understand."
 
 ## Backup Prompts
 
-Use these if the flow needs a reset or generation is weak:
-
+- `Explain the best molecule simply`
 - `Score this molecule: CC(=O)Oc1ccccc1C(=O)O`
-- `Explain this molecule simply`
-- `Compare metformin with the best one`
-- `Optimize it for oral delivery`
-- `Show the top computational candidates for diabetes`
+- `Compare it with the best one`
+- `Optimize the best molecule for oral delivery`
 
-## Safest Features To Demonstrate
+## What To Emphasize
 
-- chat interface
-- scoring a known molecule
-- molecule explanation
-- molecule comparison
-- trust messaging and limitations
-- safe fallback behavior when generation is weak
+- authenticated workspace
+- evidence-weighted ranking
+- validation ledger
+- scoring, explanation, and comparison workflows
+- explicit limitations and fallback behavior
 
 ## What To Avoid Saying
 
 Do not say:
 - "These are validated drug candidates."
-- "This has been experimentally proven."
-- "The model reliably generates new drugs."
-- "This docking result confirms efficacy."
-- "This is ready for pharma deployment."
+- "This proves efficacy."
+- "The model reliably generates new drugs today."
+- "This is clinically validated."
+- "This is production-ready biotech software."
 
 Prefer saying:
 - "computational ranking"
 - "prototype research-support output"
-- "not experimentally validated"
+- "evidence-weighted priority"
+- "heuristic or proxy signal"
 - "useful for analysis, prioritization, and explanation"
 
 ## If Generation Comes Up
 
 Safe wording:
 
-"Generation quality is still the main technical blocker. We now handle that honestly in-product by showing safe fallback molecules or an explicit failure state instead of pretending a valid fresh candidate was produced."
+"Generation is still the weakest scientific area in the current product. We
+handle that honestly by surfacing fallback molecules or an explicit empty result
+instead of pretending a fresh valid candidate was discovered."
 
-## Best Demo Narrative
+## Best Closing Line
 
-Genorova today is strongest as a trustworthy computational molecule analysis assistant. The demo should emphasize responsible UX, explainability, and disciplined handling of model limitations.
+"The value of GenorovaAI today is disciplined computational support, protected
+workspace UX, and responsible product design around scientific uncertainty."

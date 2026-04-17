@@ -1,0 +1,1 @@
+smiles,validation_status,recommendation,clinical_score,estimated_affinity_proxy,real_docking_kcal_mol,binding_signal_source,binding_signal_status,molecular_weight,qed_score,sa_score,toxicity_risk,passes_lipinski,red_flags

@@ -1,0 +1,6 @@
+sample_index,raw_smiles,canonical_smiles,is_valid_rdkit,is_unique_among_valid,valid_occurrences,is_novel_vs_reference
+1,CC1Ccccccccccccccccccccccccccccc,,False,False,0,False
+2,CC1CcccccCcccccCcccccccccccccccc,,False,False,0,False
+3,CCCccccccccccccCcccCcccccccccccc,,False,False,0,False
+4,CCCCcccccccccccccccCcccccccccccc,,False,False,0,False
+5,CC1CcccccccccccccccCcccccccccccc,,False,False,0,False

@@ -1,0 +1,11 @@
+2026-04-16 02:49:56,411 [INFO] ============================================================
+2026-04-16 02:49:56,415 [INFO] Genorova AR VAE Training
+2026-04-16 02:49:56,415 [INFO] dataset=moses  epochs=30  batch=128  device=cpu
+2026-04-16 02:49:56,416 [INFO] ============================================================
+2026-04-16 02:49:56,416 [INFO] Loading dataset: moses (max_samples=20000)
+2026-04-16 02:50:30,162 [INFO] Loaded 20000 molecules.
+2026-04-16 02:50:30,190 [INFO] Vocabulary size: 29
+2026-04-16 02:50:30,200 [INFO] SMILES length: max_observed=56  model_max_length=120
+2026-04-16 02:50:30,202 [INFO] Encoding 20000 SMILES to one-hot (this may take a moment)...
+2026-04-16 02:50:33,045 [INFO] Split: train=18000  val=2000
+2026-04-16 02:50:33,173 [INFO] Model parameters: 7199645

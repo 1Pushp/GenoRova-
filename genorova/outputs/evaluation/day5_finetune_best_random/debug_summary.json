@@ -1,0 +1,21 @@
+{
+  "empty_string_count": 0,
+  "invalid_reason_counts": {
+    "low_character_diversity": 12,
+    "unbalanced_parentheses": 10,
+    "ring_closure_mismatch": 2,
+    "long_repetitive_fragment": 1
+  },
+  "top_decoded_tokens": {
+    "c": 627,
+    "C": 156,
+    "(": 11,
+    ")": 5,
+    "1": 4,
+    "O": 1
+  },
+  "latent_debug": {
+    "latent_source": "random",
+    "latent_std": 1.002605
+  }
+}

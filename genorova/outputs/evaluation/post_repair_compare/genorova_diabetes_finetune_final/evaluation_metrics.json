@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-04-16T00:04:05.172636",
+  "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_finetune_final.pt",
+  "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes_pretrain.json",
+  "device": "cpu",
+  "generation_strategy": "guided",
+  "temperature": 0.3,
+  "seed": 42,
+  "requested_samples": 100,
+  "reference_source": "dataset:moses",
+  "reference_canonical_size": 50000,
+  "checkpoint_epoch": 10,
+  "checkpoint_best_val_loss": 1.661646556854248,
+  "checkpoint_stage_name": "finetune",
+  "checkpoint_source_label": "finetune_csv:diabetes_molecules.csv",
+  "checkpoint_mu_std": null,
+  "model_max_length": 120,
+  "resolved_vocab_size": 29,
+  "counts": {
+    "total_generated": 100,
+    "valid_rdkit": 0,
+    "invalid_rdkit": 100,
+    "unique_valid": 0,
+    "novel_valid": 0,
+    "novel_unique_valid": 0,
+    "scored_unique_valid": 0
+  },
+  "rates": {
+    "validity_pct": 0.0,
+    "uniqueness_pct_of_valid": 0.0,
+    "novelty_pct_of_valid": 0.0,
+    "novelty_pct_of_unique_valid": 0.0
+  },
+  "length_summary_raw_strings": {
+    "mean": 37.03,
+    "min": 22.0,
+    "max": 78.0
+  },
+  "debug_summary": {
+    "empty_string_count": 0,
+    "eos_terminated_count": 100,
+    "pad_terminated_count": 0,
+    "missing_bos_count": 0,
+    "missing_eos_count": 0,
+    "invalid_reason_counts": {
+      "unbalanced_parentheses": 69,
+      "ring_closure_mismatch": 19,
+      "unbalanced_brackets": 7,
+      "long_repetitive_fragment": 4,
+      "rdkit_parse_failure": 1
+    },
+    "top_decoded_tokens": {
+      "c": 1066,
+      "C": 694,
+      "(": 382,
+      ")": 376,
+      "1": 281,
+      "O": 219,
+      "=": 170,
+      "N": 132,
+      "2": 130,
+      "n": 51
+    },
+    "latent_debug": {
+      "latent_source": "guided",
+      "anchor_count": 50000,
+      "anchor_mu_std": 0.730007,
+      "anchor_mu_mean_abs": 0.574966,
+      "temperature": 0.3
+    },
+    "special_token_ids": {
+      "pad": 0,
+      "bos": 1,
+      "eos": 2,
+      "unk": 3
+    }
+  },
+  "property_summary_valid_rows": {
+    "molecular_weight": null,
+    "logp": null,
+    "tpsa": null,
+    "hbd": null,
+    "hba": null,
+    "rotatable_bonds": null,
+    "qed_score": null,
+    "sa_score": null
+  },
+  "scoring_summary_unique_valid": {
+    "average_clinical_score": null,
+    "best_clinical_score": null,
+    "top_n": 10
+  },
+  "top_candidates": []
+}

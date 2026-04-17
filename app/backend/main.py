@@ -1,4 +1,5 @@
 import csv
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
@@ -16,6 +17,7 @@ from chat_logic import handle_chat_message
 _ROOT_DIR       = Path(__file__).resolve().parents[2]
 _GENOROVA_DB    = _ROOT_DIR / "genorova" / "outputs" / "genorova_memory.db"
 _GENERATED_DIR  = _ROOT_DIR / "genorova" / "outputs" / "generated"
+LOGGER          = logging.getLogger("genorova.backend")
 
 
 class ChatRequest(BaseModel):
@@ -45,7 +47,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup() -> None:
-    chat_memory.init_db()
+    try:
+        chat_memory.init_db()
+    except Exception:
+        LOGGER.exception("Chat storage initialization failed during startup.")
 
 
 @app.exception_handler(Exception)
@@ -63,6 +68,7 @@ def root() -> dict[str, Any]:
         "frontend": "http://localhost:5173",
         "health": "/health",
         "chat": "/chat",
+        "chat_storage": "/chat/storage",
         "conversations": "/conversations",
         "docs": "/docs",
     }
@@ -70,7 +76,14 @@ def root() -> dict[str, Any]:
 
 @app.get("/health")
 def health():
-    return main_legacy_api.health()
+    payload = main_legacy_api.health()
+    payload["chat_storage"] = chat_memory.get_storage_status()
+    return payload
+
+
+@app.get("/chat/storage")
+def chat_storage():
+    return {"chat_storage": chat_memory.get_storage_status()}
 
 
 @app.post("/generate")

@@ -1,0 +1,11 @@
+rank,smiles,molecular_weight,logp,hbd,hba,tpsa,qed_score,sa_score,passes_lipinski,clinical_score,recommendation
+1,CCCCcc(ccccccccccccccccccc,320.4,13.25,0,0,0.0,0.733,3.65,False,0.5651,Borderline
+2,CCCCcc(cccccccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+3,CCCCcc(cccccccCcccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+4,CCCCcccccccccccccccccccccc,333.3,13.78,0,0,0.0,0.722,3.7,False,0.5636,Borderline
+5,CCC1ccccccccccccccccccccccc,333.3,13.78,0,0,0.0,0.722,4.1,False,0.5636,Borderline
+6,CCCCccccccccccccccccccccccc,346.1,14.31,0,0,0.0,0.712,3.75,False,0.5622,Borderline
+7,CCCCcc(ccccccccccccccccccccc,346.1,14.31,0,0,0.0,0.712,3.75,False,0.5622,Borderline
+8,CCCCcccccccccccccccccccccccc,358.9,14.84,0,0,0.0,0.701,4.1,False,0.5406,Borderline
+9,CCCCcc(cccccccccccccccccccccc,358.9,14.84,0,0,0.0,0.701,4.1,False,0.5406,Borderline
+10,CCCCccccccccccccccccccccccccc,371.7,15.37,0,0,0.0,0.69,4.15,False,0.5391,Borderline

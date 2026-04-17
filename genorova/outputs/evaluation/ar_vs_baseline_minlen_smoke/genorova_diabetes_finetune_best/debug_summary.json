@@ -1,0 +1,99 @@
+{
+  "empty_string_count": 0,
+  "empty_string_pct": 0.0,
+  "eos_terminated_count": 148,
+  "pad_terminated_count": 0,
+  "missing_bos_count": 0,
+  "missing_eos_count": 52,
+  "invalid_reason_counts": {
+    "rdkit_parse_failure": 116,
+    "long_repetitive_fragment": 31,
+    "unbalanced_parentheses": 13,
+    "ring_closure_mismatch": 12,
+    "unbalanced_brackets": 4
+  },
+  "invalidity_breakdown": {
+    "invalid_total": 176,
+    "invalid_reason_counts": {
+      "rdkit_parse_failure": 116,
+      "long_repetitive_fragment": 31,
+      "unbalanced_parentheses": 13,
+      "ring_closure_mismatch": 12,
+      "unbalanced_brackets": 4
+    },
+    "invalid_reason_percentages": {
+      "rdkit_parse_failure": 65.91,
+      "long_repetitive_fragment": 17.61,
+      "unbalanced_parentheses": 7.39,
+      "ring_closure_mismatch": 6.82,
+      "unbalanced_brackets": 2.27
+    },
+    "average_invalid_length": 81.2273,
+    "median_invalid_length": 80.0,
+    "common_invalid_endings": {
+      "ccc1": 3,
+      "CC)C": 2,
+      "2)O1": 2,
+      "CC11": 2,
+      "nH]1": 2,
+      "1CC1": 2,
+      "21C1": 2,
+      "1C2C": 1,
+      "2CH]": 1,
+      "1O1c": 1
+    },
+    "common_invalid_last_tokens": {
+      "1": 57,
+      "C": 19,
+      "2": 14,
+      "3": 14,
+      "c": 13,
+      ")": 11,
+      "O": 8,
+      "4": 8,
+      "]": 5,
+      "#": 3
+    },
+    "mean_invalid_length_by_reason": {
+      "long_repetitive_fragment": 49.2903,
+      "rdkit_parse_failure": 80.319,
+      "ring_closure_mismatch": 119.0,
+      "unbalanced_brackets": 119.0,
+      "unbalanced_parentheses": 119.0
+    },
+    "structural_residual_counts": {
+      "nonzero_parenthesis_balance": 13,
+      "nonzero_bracket_balance": 4,
+      "nonzero_unmatched_ring_count": 19
+    }
+  },
+  "top_decoded_tokens": {
+    "C": 3495,
+    "c": 2652,
+    "1": 1268,
+    "O": 1168,
+    "(": 1146,
+    ")": 1132,
+    "2": 554,
+    "=": 521,
+    "H": 440,
+    "N": 425
+  },
+  "latent_debug": {
+    "latent_source": "guided",
+    "anchor_count": 1746,
+    "anchor_mu_std": 0.679876,
+    "anchor_mu_mean_abs": 0.535192,
+    "temperature": 0.25,
+    "top_k": 5,
+    "repetition_penalty": 0.75,
+    "structural_guard_strength": 1.0,
+    "min_generation_length": null
+  },
+  "special_token_ids": {
+    "pad": 0,
+    "bos": 1,
+    "eos": 2,
+    "unk": 3
+  }
+}

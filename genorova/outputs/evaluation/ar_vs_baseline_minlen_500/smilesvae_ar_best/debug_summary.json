@@ -1,0 +1,91 @@
+{
+  "empty_string_count": 0,
+  "empty_string_pct": 0.0,
+  "eos_terminated_count": 500,
+  "pad_terminated_count": 0,
+  "missing_bos_count": 0,
+  "missing_eos_count": 0,
+  "invalid_reason_counts": {
+    "ring_closure_mismatch": 47,
+    "long_repetitive_fragment": 34,
+    "unbalanced_parentheses": 28,
+    "rdkit_parse_failure": 20
+  },
+  "invalidity_breakdown": {
+    "invalid_total": 129,
+    "invalid_reason_counts": {
+      "ring_closure_mismatch": 47,
+      "long_repetitive_fragment": 34,
+      "unbalanced_parentheses": 28,
+      "rdkit_parse_failure": 20
+    },
+    "invalid_reason_percentages": {
+      "ring_closure_mismatch": 36.43,
+      "long_repetitive_fragment": 26.36,
+      "unbalanced_parentheses": 21.71,
+      "rdkit_parse_failure": 15.5
+    },
+    "average_invalid_length": 39.4031,
+    "median_invalid_length": 41.0,
+    "common_invalid_endings": {
+      ")cc1": 19,
+      ")CC1": 10,
+      "ccc1": 9,
+      "2)c1": 8,
+      "cc21": 6,
+      "(C)C": 5,
+      "C1=O": 5,
+      "c2c1": 5,
+      "c1OC": 4,
+      "nH]1": 4
+    },
+    "common_invalid_last_tokens": {
+      "1": 95,
+      "C": 15,
+      "O": 8,
+      "2": 7,
+      "F": 3,
+      "l": 1
+    },
+    "mean_invalid_length_by_reason": {
+      "long_repetitive_fragment": 35.4412,
+      "rdkit_parse_failure": 38.55,
+      "ring_closure_mismatch": 41.4255,
+      "unbalanced_parentheses": 41.4286
+    },
+    "structural_residual_counts": {
+      "nonzero_parenthesis_balance": 20,
+      "nonzero_bracket_balance": 0,
+      "nonzero_unmatched_ring_count": 55
+    }
+  },
+  "top_decoded_tokens": {
+    "c": 4778,
+    "C": 3877,
+    "(": 1795,
+    ")": 1783,
+    "1": 1394,
+    "2": 963,
+    "O": 930,
+    "N": 820,
+    "=": 729,
+    "n": 497
+  },
+  "latent_debug": {
+    "latent_source": "guided",
+    "anchor_count": 1746,
+    "anchor_mu_std": 0.605105,
+    "anchor_mu_mean_abs": 0.482144,
+    "temperature": 0.25,
+    "top_k": 5,
+    "repetition_penalty": 0.75,
+    "structural_guard_strength": 1.0,
+    "min_generation_length": 20
+  },
+  "special_token_ids": {
+    "pad": 0,
+    "bos": 1,
+    "eos": 2,
+    "unk": 3
+  }
+}

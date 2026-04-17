@@ -1,0 +1,53 @@
+
+[*] Loading vocabulary from ..\outputs\vocabulary_diabetes_pretrain.json
+   [OK] Vocabulary loaded successfully!
+   [OK] Vocabulary size: 29
+   [OK] Explicit sequence tokens detected: <bos>, <eos>
+
+======================================================================
+GENOROVA AI — VARIATIONAL AUTOENCODER
+======================================================================
+
+[*] Initializing VAE...
+    Vocab size: 29
+    Latent dimension: 256
+    Max SMILES length: 120
+
+[*] Building Encoder (3-layer, wider)...
+   Input: [batch, 120, 29]
+   Flattened input: 3480
+   Layers: 3480 -> 1024 -> 512 -> 256
+   Output: mu and logvar (both dim 256)
+
+[*] Building Decoder (3-layer, wider)...
+   Input: [batch, 256]
+   Output (flattened): 3480
+   Layers: 256 -> 256 -> 512 -> 1024 -> 3480
+   Output (reshaped): [batch, 120, 29]
+
+[OK] VAE initialization complete!
+
+========================================================================
+GENERATION EVALUATION COMPLETE
+========================================================================
+Requested samples: 500
+Validity:          0.8%
+Top-k:             5
+Rep penalty:       0.75
+Guard strength:    1.0
+Uniqueness:        100.0% of valid
+Novelty:           100.0% of valid
+Filtered pass:     50.0% of unique valid
+Avg score:         0.7879
+Best score:        0.832
+Artifacts:         ..\outputs\evaluation\baseline_eval\generated_molecules.csv
+                   ..\outputs\evaluation\baseline_eval\all_valid_candidates.csv
+                   ..\outputs\evaluation\baseline_eval\filtered_candidates.csv
+                   ..\outputs\evaluation\baseline_eval\top_candidates_report.csv
+                   ..\outputs\evaluation\baseline_eval\evaluation_metrics.json
+                   ..\outputs\evaluation\baseline_eval\evaluation_summary.md
+                   ..\outputs\evaluation\baseline_eval\debug_decoding_samples.csv
+                   ..\outputs\evaluation\baseline_eval\debug_summary.json
+                   ..\outputs\evaluation\baseline_eval\invalidity_breakdown.json
+                   ..\outputs\evaluation\baseline_eval\candidate_filtering_summary.json
+                   ..\outputs\evaluation\baseline_eval\candidate_filtering_summary.md

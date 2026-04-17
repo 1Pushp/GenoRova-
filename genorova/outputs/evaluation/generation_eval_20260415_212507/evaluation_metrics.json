@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-04-15T21:25:17.005713",
+  "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_pretrain_best.pt",
+  "vocab_path": "genorova\\outputs\\vocabulary_diabetes_pretrain.json",
+  "device": "cpu",
+  "generation_strategy": "guided",
+  "temperature": 0.3,
+  "requested_samples": 10,
+  "reference_source": "dataset:moses",
+  "reference_canonical_size": 1000,
+  "checkpoint_epoch": 1,
+  "checkpoint_best_val_loss": 0.44811105728149414,
+  "model_max_length": 120,
+  "counts": {
+    "total_generated": 10,
+    "valid_rdkit": 0,
+    "invalid_rdkit": 10,
+    "unique_valid": 0,
+    "novel_valid": 0,
+    "novel_unique_valid": 0,
+    "scored_unique_valid": 0
+  },
+  "rates": {
+    "validity_pct": 0.0,
+    "uniqueness_pct_of_valid": 0.0,
+    "novelty_pct_of_valid": 0.0,
+    "novelty_pct_of_unique_valid": 0.0
+  },
+  "property_summary_valid_rows": {
+    "molecular_weight": null,
+    "logp": null,
+    "tpsa": null,
+    "hbd": null,
+    "hba": null,
+    "rotatable_bonds": null,
+    "qed_score": null,
+    "sa_score": null
+  },
+  "scoring_summary_unique_valid": {
+    "average_clinical_score": null,
+    "best_clinical_score": null,
+    "top_n": 5
+  },
+  "top_candidates": []
+}

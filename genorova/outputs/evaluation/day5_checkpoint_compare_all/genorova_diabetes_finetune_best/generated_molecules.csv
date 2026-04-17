@@ -1,0 +1,26 @@
+sample_index,raw_smiles,raw_length,first_pad_position,effective_token_ids,canonical_smiles,is_valid_rdkit,is_unique_among_valid,valid_occurrences,is_novel_vs_reference,invalid_reason
+1,CCCCC)CCCcCccc,14,14,11 11 11 11 11 3 11 11 11 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+2,CcCCcccccccccccccccccccccccccccccccccc,38,38,11 19 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+3,CCCCcccccccccccccccccccccccccccccccc,36,36,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+4,CCCCcccccccccccccccccccccccccccccc,34,34,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+5,CCCCccccccccccccccccccccccc,27,27,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+6,CCCCC)CCccCccc,14,14,11 11 11 11 11 3 11 11 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+7,CCCCC)CCCcCccc,14,14,11 11 11 11 11 3 11 11 11 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+8,CCCCC)ccccCccccccccc,20,20,11 11 11 11 11 3 19 19 19 19 11 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+9,CCCCC)ccccccccccccccccc,23,23,11 11 11 11 11 3 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+10,CCCCcccccccccccccccccccc,24,24,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+11,CC1Cccccccccccccccccccc,23,23,11 11 5 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,ring_closure_mismatch
+12,CCCCC)CCccCccc,14,14,11 11 11 11 11 3 11 11 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+13,CCCCO)Ccccccccccccccccc,23,23,11 11 11 11 15 3 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+14,CCCCccccccccccccccccccccccccccccccccc,37,37,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+15,CCCCcccccccccccccccccccccc,26,26,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+16,CCCCccccccccccccccccccccccccccccccccc,37,37,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+17,CCCCC)CCCcCccc,14,14,11 11 11 11 11 3 11 11 11 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+18,CCCCC)CCccCccc,14,14,11 11 11 11 11 3 11 11 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+19,CCCCC)ccccCccccccccc,20,20,11 11 11 11 11 3 19 19 19 19 11 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+20,CCCCcccccccccccccccccccc,24,24,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+21,CCCCccccccccccccccccccccccccccccccccc,37,37,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+22,CCCCC)CCccCccc,14,14,11 11 11 11 11 3 11 11 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+23,CCCCcccccccccccccccccccccc,26,26,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+24,CCCCcccccccccccccccccccccccccccccccc,36,36,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+25,CCCCccccccccccccccccccccccccccccccccc,37,37,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity

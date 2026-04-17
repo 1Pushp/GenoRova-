@@ -1,0 +1,26 @@
+sample_index,raw_smiles,raw_length,first_pad_position,effective_token_ids,canonical_smiles,is_valid_rdkit,is_unique_among_valid,valid_occurrences,is_novel_vs_reference,invalid_reason
+1,CCCCC)CcccCccc,14,14,11 11 11 11 11 3 11 19 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+2,CCCCccccccccccccccccccccccccccccc,33,33,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+3,CCCCC)CcCcCcccccccccc,21,21,11 11 11 11 11 3 11 19 11 19 11 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+4,CcCCcccccccccccccccccccccccccccccccccccc,40,40,11 19 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+5,CCCCC)CCccCccc,14,14,11 11 11 11 11 3 11 11 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+6,CC1Cccccccccccccccccccccccc,27,27,11 11 5 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,ring_closure_mismatch
+7,CC1Ccccccccccccccccccccccccccccc,32,32,11 11 5 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,ring_closure_mismatch
+8,CcCCccccccccccccccccccccccccccccccccccc,39,39,11 19 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+9,CCCCccccccccccccccccccccccccccccc,33,33,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+10,CCCCC)CCccCccc,14,14,11 11 11 11 11 3 11 11 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+11,CCCCccccccccccccccccccc,23,23,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+12,CCCCC)CCccCccc,14,14,11 11 11 11 11 3 11 11 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+13,CCCCC)CcCccccc,14,14,11 11 11 11 11 3 11 19 11 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+14,CcCCcccccccccccccccccccccccccccccccc,36,36,11 19 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+15,CCCCccccccccccccccccccc,23,23,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+16,CC1Ccccccccccccccccccccc,24,24,11 11 5 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,ring_closure_mismatch
+17,CCCCcccccccccccccccccccccc,26,26,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+18,CCCCC)CCccCccccccccc,20,20,11 11 11 11 11 3 11 11 19 19 11 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+19,CC(Ccccccccccccccccccccccccccccc,32,32,11 11 2 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+20,CCCCc)cccccccccccccccc,22,22,11 11 11 11 19 3 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+21,CCCCcccccccccccccccccccccccccccccccc,36,36,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+22,CC1Cccccccccccccccccccccccccccccccccc,37,37,11 11 5 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,ring_closure_mismatch
+23,CCCCc)ccccccccccccccccc,23,23,11 11 11 11 19 3 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+24,CCCCccccccccccccccccccc,23,23,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+25,CcCCcccccccccccccccccccccccccccccccccc,38,38,11 19 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity

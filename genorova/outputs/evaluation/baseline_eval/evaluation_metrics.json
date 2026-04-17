@@ -1,0 +1,303 @@
+{
+  "generated_at": "2026-04-16T03:12:21.498219",
+  "checkpoint_path": "..\\outputs\\models\\diabetes\\genorova_diabetes_finetune_best.pt",
+  "vocab_path": "..\\outputs\\vocabulary_diabetes_pretrain.json",
+  "device": "cpu",
+  "generation_strategy": "random",
+  "temperature": 0.3,
+  "top_k": 5,
+  "repetition_penalty": 0.75,
+  "structural_guard_strength": 1.0,
+  "seed": 42,
+  "requested_samples": 500,
+  "reference_source": "dataset:moses",
+  "reference_canonical_size": 10000,
+  "checkpoint_epoch": 10,
+  "checkpoint_best_val_loss": 1.661646556854248,
+  "checkpoint_stage_name": "finetune",
+  "checkpoint_source_label": "finetune_csv:diabetes_molecules.csv",
+  "checkpoint_mu_std": 0.6615542769432068,
+  "model_max_length": 120,
+  "resolved_vocab_size": 29,
+  "counts": {
+    "total_generated": 500,
+    "valid_rdkit": 4,
+    "invalid_rdkit": 496,
+    "unique_valid": 4,
+    "novel_valid": 4,
+    "novel_unique_valid": 4,
+    "scored_unique_valid": 4
+  },
+  "rates": {
+    "validity_pct": 0.8,
+    "uniqueness_pct_of_valid": 100.0,
+    "novelty_pct_of_valid": 100.0,
+    "novelty_pct_of_unique_valid": 100.0
+  },
+  "length_summary_raw_strings": {
+    "mean": 94.25,
+    "min": 19.0,
+    "max": 119.0
+  },
+  "debug_summary": {
+    "empty_string_count": 0,
+    "empty_string_pct": 0.0,
+    "eos_terminated_count": 259,
+    "pad_terminated_count": 0,
+    "missing_bos_count": 0,
+    "missing_eos_count": 241,
+    "invalid_reason_counts": {
+      "rdkit_parse_failure": 305,
+      "ring_closure_mismatch": 84,
+      "unbalanced_parentheses": 52,
+      "long_repetitive_fragment": 32,
+      "unbalanced_brackets": 23
+    },
+    "invalidity_breakdown": {
+      "invalid_total": 496,
+      "invalid_reason_counts": {
+        "rdkit_parse_failure": 305,
+        "ring_closure_mismatch": 84,
+        "unbalanced_parentheses": 52,
+        "long_repetitive_fragment": 32,
+        "unbalanced_brackets": 23
+      },
+      "invalid_reason_percentages": {
+        "rdkit_parse_failure": 61.49,
+        "ring_closure_mismatch": 16.94,
+        "unbalanced_parentheses": 10.48,
+        "long_repetitive_fragment": 6.45,
+        "unbalanced_brackets": 4.64
+      },
+      "average_invalid_length": 94.7762,
+      "median_invalid_length": 118.0,
+      "common_invalid_endings": {
+        "2)O1": 7,
+        "O)C1": 6,
+        "N1C2": 4,
+        "2HO1": 3,
+        "CCC1": 3,
+        "OO)C": 3,
+        "CC=O": 3,
+        "C)C1": 3,
+        "CO)C": 3,
+        "C1=O": 2
+      },
+      "common_invalid_last_tokens": {
+        "1": 104,
+        ")": 58,
+        "C": 56,
+        "2": 47,
+        "O": 28,
+        "l": 24,
+        "r": 23,
+        "N": 21,
+        "]": 20,
+        "4": 18
+      },
+      "mean_invalid_length_by_reason": {
+        "long_repetitive_fragment": 48.0312,
+        "rdkit_parse_failure": 87.0525,
+        "ring_closure_mismatch": 119.0,
+        "unbalanced_brackets": 119.0,
+        "unbalanced_parentheses": 119.0
+      },
+      "structural_residual_counts": {
+        "nonzero_parenthesis_balance": 52,
+        "nonzero_bracket_balance": 33,
+        "nonzero_unmatched_ring_count": 116
+      }
+    },
+    "top_decoded_tokens": {
+      "C": 16523,
+      "c": 4143,
+      "O": 3958,
+      "(": 3433,
+      ")": 3366,
+      "1": 3183,
+      "H": 2047,
+      "[": 1824,
+      "]": 1791,
+      "2": 1365
+    },
+    "latent_debug": {
+      "latent_source": "random",
+      "latent_std": 1.000067,
+      "top_k": 5,
+      "repetition_penalty": 0.75,
+      "structural_guard_strength": 1.0
+    },
+    "special_token_ids": {
+      "pad": 0,
+      "bos": 1,
+      "eos": 2,
+      "unk": 3
+    }
+  },
+  "property_summary_valid_rows": {
+    "molecular_weight": {
+      "mean": 242.865,
+      "min": 170.25,
+      "max": 284.4
+    },
+    "logp": {
+      "mean": 2.9865,
+      "min": 2.088,
+      "max": 4.367
+    },
+    "tpsa": {
+      "mean": 37.87,
+      "min": 29.46,
+      "max": 55.12
+    },
+    "hbd": {
+      "mean": 1.0,
+      "min": 0.0,
+      "max": 2.0
+    },
+    "hba": {
+      "mean": 2.0,
+      "min": 2.0,
+      "max": 2.0
+    },
+    "rotatable_bonds": {
+      "mean": 5.5,
+      "min": 2.0,
+      "max": 8.0
+    },
+    "qed_score": {
+      "mean": 0.5561,
+      "min": 0.3887,
+      "max": 0.7287
+    },
+    "sa_score": {
+      "mean": 4.0507,
+      "min": 3.4896,
+      "max": 5.153
+    }
+  },
+  "scoring_summary_unique_valid": {
+    "average_clinical_score": 0.7879,
+    "best_clinical_score": 0.832,
+    "top_n": 10
+  },
+  "filtering_summary": {
+    "thresholds": {
+      "qed_min": 0.5,
+      "sa_max": 6.0,
+      "mw_min": 150.0,
+      "mw_max": 500.0,
+      "logp_min": -1.0,
+      "logp_max": 5.0,
+      "require_lipinski": true
+    },
+    "unique_valid_candidates": 4,
+    "filtered_candidate_count": 2,
+    "filtered_candidate_pct_of_unique_valid": 50.0,
+    "rejection_reason_counts": {
+      "qed_below_threshold": 2
+    },
+    "top_filtered_candidates": [
+      {
+        "canonical_smiles": "CC(C)NCC(CCC1CC=CC=CC1)C(N)=O",
+        "clinical_score": 0.832,
+        "qed_score": 0.7287,
+        "sa_score": 3.4896,
+        "molecular_weight": 250.39,
+        "logp": 2.389,
+        "tpsa": 55.12,
+        "passes_lipinski": true,
+        "is_novel_vs_reference": true,
+        "filter_status": "filtered_in",
+        "filter_reason": "passed_all_filters"
+      },
+      {
+        "canonical_smiles": "C#CC1(CC2CCC2O)CC2=C1C1C(=O)C1CC(C)CC2",
+        "clinical_score": 0.785,
+        "qed_score": 0.6247,
+        "sa_score": 5.153,
+        "molecular_weight": 284.4,
+        "logp": 3.102,
+        "tpsa": 37.3,
+        "passes_lipinski": true,
+        "is_novel_vs_reference": true,
+        "filter_status": "filtered_in",
+        "filter_reason": "passed_all_filters"
+      }
+    ]
+  },
+  "top_candidates": [
+    {
+      "canonical_smiles": "CC(C)NCC(CCC1CC=CC=CC1)C(N)=O",
+      "clinical_score": 0.832,
+      "scorer_recommendation": "Strong candidate",
+      "qed_score": 0.7287,
+      "sa_score": 3.4896,
+      "molecular_weight": 250.39,
+      "logp": 2.389,
+      "tpsa": 55.12,
+      "passes_lipinski": true
+    },
+    {
+      "canonical_smiles": "CC1=C(CCCOC(C)O)C1C",
+      "clinical_score": 0.8069,
+      "scorer_recommendation": "Strong candidate",
+      "qed_score": 0.3887,
+      "sa_score": 3.7273,
+      "molecular_weight": 170.25,
+      "logp": 2.088,
+      "tpsa": 29.46,
+      "passes_lipinski": true
+    },
+    {
+      "canonical_smiles": "C#CC1(CC2CCC2O)CC2=C1C1C(=O)C1CC(C)CC2",
+      "clinical_score": 0.785,
+      "scorer_recommendation": "Strong candidate",
+      "qed_score": 0.6247,
+      "sa_score": 5.153,
+      "molecular_weight": 284.4,
+      "logp": 3.102,
+      "tpsa": 37.3,
+      "passes_lipinski": true
+    },
+    {
+      "canonical_smiles": "CCCCCC1CC(=O)CC(CCCC)C1C1CO1",
+      "clinical_score": 0.7275,
+      "scorer_recommendation": "Strong candidate",
+      "qed_score": 0.4821,
+      "sa_score": 3.833,
+      "molecular_weight": 266.42,
+      "logp": 4.367,
+      "tpsa": 29.6,
+      "passes_lipinski": true
+    }
+  ],
+  "top_filtered_candidates": [
+    {
+      "canonical_smiles": "CC(C)NCC(CCC1CC=CC=CC1)C(N)=O",
+      "clinical_score": 0.832,
+      "qed_score": 0.7287,
+      "sa_score": 3.4896,
+      "molecular_weight": 250.39,
+      "logp": 2.389,
+      "tpsa": 55.12,
+      "passes_lipinski": true,
+      "is_novel_vs_reference": true,
+      "filter_status": "filtered_in",
+      "filter_reason": "passed_all_filters"
+    },
+    {
+      "canonical_smiles": "C#CC1(CC2CCC2O)CC2=C1C1C(=O)C1CC(C)CC2",
+      "clinical_score": 0.785,
+      "qed_score": 0.6247,
+      "sa_score": 5.153,
+      "molecular_weight": 284.4,
+      "logp": 3.102,
+      "tpsa": 37.3,
+      "passes_lipinski": true,
+      "is_novel_vs_reference": true,
+      "filter_status": "filtered_in",
+      "filter_reason": "passed_all_filters"
+    }
+  ]
+}

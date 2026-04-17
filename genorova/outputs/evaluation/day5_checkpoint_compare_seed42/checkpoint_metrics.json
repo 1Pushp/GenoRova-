@@ -1,0 +1,388 @@
+[
+  {
+    "generated_at": "2026-04-15T22:00:56.242284",
+    "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_best.pt",
+    "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes.json",
+    "device": "cpu",
+    "generation_strategy": "guided",
+    "temperature": 0.3,
+    "seed": 42,
+    "requested_samples": 50,
+    "reference_source": "dataset:moses",
+    "reference_canonical_size": 1000,
+    "checkpoint_epoch": 83,
+    "checkpoint_best_val_loss": 0.1767134487628937,
+    "checkpoint_stage_name": null,
+    "checkpoint_source_label": null,
+    "checkpoint_mu_std": 0.41036489605903625,
+    "model_max_length": 120,
+    "resolved_vocab_size": 39,
+    "counts": {
+      "total_generated": 50,
+      "valid_rdkit": 0,
+      "invalid_rdkit": 50,
+      "unique_valid": 0,
+      "novel_valid": 0,
+      "novel_unique_valid": 0,
+      "scored_unique_valid": 0
+    },
+    "rates": {
+      "validity_pct": 0.0,
+      "uniqueness_pct_of_valid": 0.0,
+      "novelty_pct_of_valid": 0.0,
+      "novelty_pct_of_unique_valid": 0.0
+    },
+    "length_summary_raw_strings": {
+      "mean": 34.9,
+      "min": 27.0,
+      "max": 44.0
+    },
+    "debug_summary": {
+      "empty_string_count": 0,
+      "invalid_reason_counts": {
+        "unbalanced_parentheses": 35,
+        "ring_closure_mismatch": 9,
+        "long_repetitive_fragment": 6
+      },
+      "top_decoded_tokens": {
+        "c": 885,
+        "C": 329,
+        ")": 142,
+        "(": 117,
+        "1": 86,
+        "O": 55,
+        "2": 43,
+        "=": 36,
+        "N": 22,
+        "n": 8
+      },
+      "latent_debug": {
+        "latent_source": "guided",
+        "anchor_count": 1000,
+        "anchor_mu_std": 0.388652,
+        "anchor_mu_mean_abs": 0.324468,
+        "temperature": 0.3
+      }
+    },
+    "property_summary_valid_rows": {
+      "molecular_weight": null,
+      "logp": null,
+      "tpsa": null,
+      "hbd": null,
+      "hba": null,
+      "rotatable_bonds": null,
+      "qed_score": null,
+      "sa_score": null
+    },
+    "scoring_summary_unique_valid": {
+      "average_clinical_score": null,
+      "best_clinical_score": null,
+      "top_n": 5
+    },
+    "top_candidates": []
+  },
+  {
+    "generated_at": "2026-04-15T22:01:06.205046",
+    "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_pretrain_best.pt",
+    "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes_pretrain.json",
+    "device": "cpu",
+    "generation_strategy": "guided",
+    "temperature": 0.3,
+    "seed": 42,
+    "requested_samples": 50,
+    "reference_source": "dataset:moses",
+    "reference_canonical_size": 1000,
+    "checkpoint_epoch": 1,
+    "checkpoint_best_val_loss": 0.44811105728149414,
+    "checkpoint_stage_name": "pretrain",
+    "checkpoint_source_label": "dataset:moses",
+    "checkpoint_mu_std": 0.11832963675260544,
+    "model_max_length": 120,
+    "resolved_vocab_size": 25,
+    "counts": {
+      "total_generated": 50,
+      "valid_rdkit": 0,
+      "invalid_rdkit": 50,
+      "unique_valid": 0,
+      "novel_valid": 0,
+      "novel_unique_valid": 0,
+      "scored_unique_valid": 0
+    },
+    "rates": {
+      "validity_pct": 0.0,
+      "uniqueness_pct_of_valid": 0.0,
+      "novelty_pct_of_valid": 0.0,
+      "novelty_pct_of_unique_valid": 0.0
+    },
+    "length_summary_raw_strings": {
+      "mean": 32.0,
+      "min": 32.0,
+      "max": 32.0
+    },
+    "debug_summary": {
+      "empty_string_count": 0,
+      "invalid_reason_counts": {
+        "low_character_diversity": 32,
+        "ring_closure_mismatch": 18
+      },
+      "top_decoded_tokens": {
+        "c": 1334,
+        "C": 248,
+        "1": 18
+      },
+      "latent_debug": {
+        "latent_source": "guided",
+        "anchor_count": 1000,
+        "anchor_mu_std": 0.118232,
+        "anchor_mu_mean_abs": 0.094379,
+        "temperature": 0.3
+      }
+    },
+    "property_summary_valid_rows": {
+      "molecular_weight": null,
+      "logp": null,
+      "tpsa": null,
+      "hbd": null,
+      "hba": null,
+      "rotatable_bonds": null,
+      "qed_score": null,
+      "sa_score": null
+    },
+    "scoring_summary_unique_valid": {
+      "average_clinical_score": null,
+      "best_clinical_score": null,
+      "top_n": 5
+    },
+    "top_candidates": []
+  },
+  {
+    "generated_at": "2026-04-15T22:01:16.263278",
+    "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_pretrain_final.pt",
+    "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes_pretrain.json",
+    "device": "cpu",
+    "generation_strategy": "guided",
+    "temperature": 0.3,
+    "seed": 42,
+    "requested_samples": 50,
+    "reference_source": "dataset:moses",
+    "reference_canonical_size": 1000,
+    "checkpoint_epoch": 1,
+    "checkpoint_best_val_loss": 0.44811105728149414,
+    "checkpoint_stage_name": "pretrain",
+    "checkpoint_source_label": "dataset:moses",
+    "checkpoint_mu_std": null,
+    "model_max_length": 120,
+    "resolved_vocab_size": 25,
+    "counts": {
+      "total_generated": 50,
+      "valid_rdkit": 0,
+      "invalid_rdkit": 50,
+      "unique_valid": 0,
+      "novel_valid": 0,
+      "novel_unique_valid": 0,
+      "scored_unique_valid": 0
+    },
+    "rates": {
+      "validity_pct": 0.0,
+      "uniqueness_pct_of_valid": 0.0,
+      "novelty_pct_of_valid": 0.0,
+      "novelty_pct_of_unique_valid": 0.0
+    },
+    "length_summary_raw_strings": {
+      "mean": 32.0,
+      "min": 32.0,
+      "max": 32.0
+    },
+    "debug_summary": {
+      "empty_string_count": 0,
+      "invalid_reason_counts": {
+        "low_character_diversity": 32,
+        "ring_closure_mismatch": 18
+      },
+      "top_decoded_tokens": {
+        "c": 1334,
+        "C": 248,
+        "1": 18
+      },
+      "latent_debug": {
+        "latent_source": "guided",
+        "anchor_count": 1000,
+        "anchor_mu_std": 0.118232,
+        "anchor_mu_mean_abs": 0.094379,
+        "temperature": 0.3
+      }
+    },
+    "property_summary_valid_rows": {
+      "molecular_weight": null,
+      "logp": null,
+      "tpsa": null,
+      "hbd": null,
+      "hba": null,
+      "rotatable_bonds": null,
+      "qed_score": null,
+      "sa_score": null
+    },
+    "scoring_summary_unique_valid": {
+      "average_clinical_score": null,
+      "best_clinical_score": null,
+      "top_n": 5
+    },
+    "top_candidates": []
+  },
+  {
+    "generated_at": "2026-04-15T22:01:26.249160",
+    "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_finetune_best.pt",
+    "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes_pretrain.json",
+    "device": "cpu",
+    "generation_strategy": "guided",
+    "temperature": 0.3,
+    "seed": 42,
+    "requested_samples": 50,
+    "reference_source": "dataset:moses",
+    "reference_canonical_size": 1000,
+    "checkpoint_epoch": 1,
+    "checkpoint_best_val_loss": 0.24397926330566405,
+    "checkpoint_stage_name": "finetune",
+    "checkpoint_source_label": "finetune_csv:diabetes_molecules.csv",
+    "checkpoint_mu_std": 0.7160517573356628,
+    "model_max_length": 120,
+    "resolved_vocab_size": 25,
+    "counts": {
+      "total_generated": 50,
+      "valid_rdkit": 0,
+      "invalid_rdkit": 50,
+      "unique_valid": 0,
+      "novel_valid": 0,
+      "novel_unique_valid": 0,
+      "scored_unique_valid": 0
+    },
+    "rates": {
+      "validity_pct": 0.0,
+      "uniqueness_pct_of_valid": 0.0,
+      "novelty_pct_of_valid": 0.0,
+      "novelty_pct_of_unique_valid": 0.0
+    },
+    "length_summary_raw_strings": {
+      "mean": 22.96,
+      "min": 14.0,
+      "max": 39.0
+    },
+    "debug_summary": {
+      "empty_string_count": 0,
+      "invalid_reason_counts": {
+        "unbalanced_parentheses": 31,
+        "low_character_diversity": 12,
+        "ring_closure_mismatch": 7
+      },
+      "top_decoded_tokens": {
+        "c": 840,
+        "C": 268,
+        ")": 29,
+        "1": 8,
+        "(": 2,
+        "O": 1
+      },
+      "latent_debug": {
+        "latent_source": "guided",
+        "anchor_count": 1000,
+        "anchor_mu_std": 0.579719,
+        "anchor_mu_mean_abs": 0.443929,
+        "temperature": 0.3
+      }
+    },
+    "property_summary_valid_rows": {
+      "molecular_weight": null,
+      "logp": null,
+      "tpsa": null,
+      "hbd": null,
+      "hba": null,
+      "rotatable_bonds": null,
+      "qed_score": null,
+      "sa_score": null
+    },
+    "scoring_summary_unique_valid": {
+      "average_clinical_score": null,
+      "best_clinical_score": null,
+      "top_n": 5
+    },
+    "top_candidates": []
+  },
+  {
+    "generated_at": "2026-04-15T22:01:35.385940",
+    "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_finetune_final.pt",
+    "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes_pretrain.json",
+    "device": "cpu",
+    "generation_strategy": "guided",
+    "temperature": 0.3,
+    "seed": 42,
+    "requested_samples": 50,
+    "reference_source": "dataset:moses",
+    "reference_canonical_size": 1000,
+    "checkpoint_epoch": 1,
+    "checkpoint_best_val_loss": 0.24397926330566405,
+    "checkpoint_stage_name": "finetune",
+    "checkpoint_source_label": "finetune_csv:diabetes_molecules.csv",
+    "checkpoint_mu_std": null,
+    "model_max_length": 120,
+    "resolved_vocab_size": 25,
+    "counts": {
+      "total_generated": 50,
+      "valid_rdkit": 0,
+      "invalid_rdkit": 50,
+      "unique_valid": 0,
+      "novel_valid": 0,
+      "novel_unique_valid": 0,
+      "scored_unique_valid": 0
+    },
+    "rates": {
+      "validity_pct": 0.0,
+      "uniqueness_pct_of_valid": 0.0,
+      "novelty_pct_of_valid": 0.0,
+      "novelty_pct_of_unique_valid": 0.0
+    },
+    "length_summary_raw_strings": {
+      "mean": 22.96,
+      "min": 14.0,
+      "max": 39.0
+    },
+    "debug_summary": {
+      "empty_string_count": 0,
+      "invalid_reason_counts": {
+        "unbalanced_parentheses": 31,
+        "low_character_diversity": 12,
+        "ring_closure_mismatch": 7
+      },
+      "top_decoded_tokens": {
+        "c": 840,
+        "C": 268,
+        ")": 29,
+        "1": 8,
+        "(": 2,
+        "O": 1
+      },
+      "latent_debug": {
+        "latent_source": "guided",
+        "anchor_count": 1000,
+        "anchor_mu_std": 0.579719,
+        "anchor_mu_mean_abs": 0.443929,
+        "temperature": 0.3
+      }
+    },
+    "property_summary_valid_rows": {
+      "molecular_weight": null,
+      "logp": null,
+      "tpsa": null,
+      "hbd": null,
+      "hba": null,
+      "rotatable_bonds": null,
+      "qed_score": null,
+      "sa_score": null
+    },
+    "scoring_summary_unique_valid": {
+      "average_clinical_score": null,
+      "best_clinical_score": null,
+      "top_n": 5
+    },
+    "top_candidates": []
+  }
+]

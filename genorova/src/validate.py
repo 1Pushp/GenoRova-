@@ -38,7 +38,7 @@ Layer 3 — Drug-Specific Properties:
 
 Layer 4 — Clinical Scoring (from Phase 3 diabetes trials):
   Score against:
-  • Binding affinity to insulin receptor (predicted)
+  • Heuristic binding proxy to insulin receptor
   • Predicted HbA1c reduction potential
   • Toxicity risk assessment
   • Synthetic accessibility for patient access
@@ -80,7 +80,10 @@ MOLECULE REPORT TEMPLATE:
   },
   
   "layer_4_clinical_score": {
-    "predicted_binding_affinity": float,  # kcal/mol
+    "estimated_affinity_proxy": float,  # heuristic proxy, not docking
+    "real_docking_kcal_mol": float | None,  # populated only by a real docking run
+    "binding_signal_source": "heuristic_proxy" | "real_docking",
+    "binding_signal_status": "real_docking_not_run" | "real_docking_available",
     "binding_score": float,  # 0-1
     "toxicity_risk": "LOW" | "MEDIUM" | "HIGH",
     "safety_score": float,  # 0-1
@@ -144,10 +147,12 @@ MIN_PSA = 20  # Polar Surface Area (Ų)
 MAX_PSA = 100
 MAX_ROTATABLE_BONDS = 10
 
-# Binding affinity thresholds (predicted, kcal/mol)
-STRONG_BINDING = -8.0
-GOOD_BINDING = -7.0
-ACCEPTABLE_BINDING = -6.0
+# Heuristic affinity-proxy thresholds on a legacy scale retained for ranking
+# continuity. These values are NOT physical energies and must never be shown as
+# kcal/mol.
+STRONG_BINDING_PROXY = -8.0
+GOOD_BINDING_PROXY = -7.0
+ACCEPTABLE_BINDING_PROXY = -6.0
 
 # Clinical scoring thresholds
 MIN_CLINICAL_SCORE = 0.60
@@ -404,21 +409,23 @@ def calculate_drug_properties(smiles):
 # LAYER 4: CLINICAL SCORING
 # ============================================================================
 
-def predict_binding_affinity(smiles, target="insulin_receptor"):
+def estimate_affinity_proxy(smiles, target="insulin_receptor"):
     """
-    Predict binding affinity to target protein.
-    
-    Note: This is a simplified model. In production, use:
-    - Molecular docking (AutoDock Vina)
-    - ML models trained on PDBbind dataset
-    - More sophisticated scoring functions
+    Estimate a heuristic affinity proxy for a target protein.
+
+    This function does NOT run molecular docking and does NOT produce a
+    physics-based binding free energy. It is a descriptor-based proxy built
+    from simple molecular features and retained only as a coarse ranking aid.
+
+    If a real docking result is available, it must be stored separately under
+    `real_docking_kcal_mol` and never merged into this proxy field.
     
     Args:
         smiles (str): SMILES string
         target (str): Target protein name
     
     Returns:
-        float: Predicted binding affinity (kcal/mol)
+        float: Unitless heuristic proxy on a legacy negative-valued scale.
     """
     try:
         mol = Chem.MolFromSmiles(smiles)
@@ -450,8 +457,9 @@ def predict_binding_affinity(smiles, target="insulin_receptor"):
         elif 150 <= mw <= 450:
             favorable_features += 0.5
         
-        # Convert to affinity score (more negative = better binding)
-        # Baseline -4.0, can go up to -10.0
+        # Convert to a legacy proxy scale (more negative = stronger heuristic
+        # interaction signal). This is NOT kcal/mol and should never be shown
+        # with physical-energy units.
         affinity = -4.0 - (favorable_features * 0.3)
         affinity = max(affinity, -10.0)  # Cap at -10.0
         
@@ -459,6 +467,26 @@ def predict_binding_affinity(smiles, target="insulin_receptor"):
     
     except:
         return -4.0
+
+
+def get_real_docking_kcal_mol(smiles, target="insulin_receptor"):
+    """
+    Return a real docking energy only when this validation flow has access to a
+    previously executed docking run.
+
+    The current validate.py pipeline does not launch AutoDock Vina directly.
+    Real docking exists elsewhere in the codebase (`real_vina_docking.py` and
+    `src/docking/`), so this field is intentionally `None` until an actual
+    docking job has been run and integrated into this flow.
+
+    Args:
+        smiles (str): SMILES string.
+        target (str): Target protein name.
+
+    Returns:
+        float | None: Real docking energy in kcal/mol, or `None` if unavailable.
+    """
+    return None
 
 
 def assess_toxicity_risk(smiles):
@@ -474,7 +502,7 @@ def assess_toxicity_risk(smiles):
     try:
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
-            return "UNKNOWN", 0.5
+            return "UNKNOWN", 0.5, []
         
         risk_score = 0.0
         risk_factors = []
@@ -548,7 +576,8 @@ def calculate_novelty_score(smiles):
         return 0.5
 
 
-def calculate_clinical_score(smiles, binding_affinity=None, toxicity_risk=None, novelty_score=None):
+def calculate_clinical_score(smiles, estimated_affinity_proxy=None, real_docking_kcal_mol=None,
+                             toxicity_risk=None, novelty_score=None):
     """
     Calculate comprehensive clinical score.
     
@@ -557,7 +586,8 @@ def calculate_clinical_score(smiles, binding_affinity=None, toxicity_risk=None, 
     
     Args:
         smiles (str): SMILES string
-        binding_affinity (float): Predicted binding affinity (kcal/mol)
+        estimated_affinity_proxy (float): Heuristic proxy, not docking
+        real_docking_kcal_mol (float | None): Real docking energy if available
         toxicity_risk (str): Toxicity risk level
         novelty_score (float): Novelty score (0-1)
     
@@ -565,8 +595,10 @@ def calculate_clinical_score(smiles, binding_affinity=None, toxicity_risk=None, 
         dict: Clinical scoring details
     """
     # Get predictions if not provided
-    if binding_affinity is None:
-        binding_affinity = predict_binding_affinity(smiles)
+    if estimated_affinity_proxy is None:
+        estimated_affinity_proxy = estimate_affinity_proxy(smiles)
+    if real_docking_kcal_mol is None:
+        real_docking_kcal_mol = get_real_docking_kcal_mol(smiles)
     
     if toxicity_risk is None:
         toxicity_risk, _, _ = assess_toxicity_risk(smiles)
@@ -574,10 +606,18 @@ def calculate_clinical_score(smiles, binding_affinity=None, toxicity_risk=None, 
     if novelty_score is None:
         novelty_score = calculate_novelty_score(smiles)
     
-    # 1. Binding score (0-1): Convert affinity to score
-    # -10.0 (excellent) → 1.0
-    # -4.0 (weak) → 0.3
-    binding_score = max(0.0, min(1.0, (binding_affinity + 4.0) / 6.0))
+    # 1. Binding score (0-1): Prefer real docking if present, otherwise fall
+    # back to the heuristic proxy.
+    binding_signal = real_docking_kcal_mol if real_docking_kcal_mol is not None else estimated_affinity_proxy
+    binding_signal_source = "real_docking" if real_docking_kcal_mol is not None else "heuristic_proxy"
+    binding_signal_status = (
+        "real_docking_available" if real_docking_kcal_mol is not None else "real_docking_not_run"
+    )
+
+    # Legacy mapping retained for score continuity.
+    # -10.0 (stronger signal) -> 1.0
+    # -4.0 (weaker signal) -> 0.0
+    binding_score = max(0.0, min(1.0, (-binding_signal - 4.0) / 6.0))
     
     # 2. Safety score (0-1): Based on toxicity
     toxicity_weights = {"LOW": 1.0, "MEDIUM": 0.6, "HIGH": 0.2, "UNKNOWN": 0.5}
@@ -591,7 +631,10 @@ def calculate_clinical_score(smiles, binding_affinity=None, toxicity_risk=None, 
     clinical_score = round(clinical_score, 3)
     
     return {
-        "binding_affinity": binding_affinity,
+        "estimated_affinity_proxy": estimated_affinity_proxy,
+        "real_docking_kcal_mol": real_docking_kcal_mol,
+        "binding_signal_source": binding_signal_source,
+        "binding_signal_status": binding_signal_status,
         "binding_score": round(binding_score, 3),
         "toxicity_risk": toxicity_risk,
         "safety_score": round(safety_score, 3),
@@ -653,7 +696,12 @@ def generate_molecule_report(smiles):
     
     # Generate rationale
     rationale = f"Molecule scores {layer4['clinical_score']:.3f} on clinical scale. "
-    rationale += f"Binding affinity: {layer4['binding_affinity']:.2f} kcal/mol. "
+    rationale += (
+        f"Heuristic affinity proxy: {layer4['estimated_affinity_proxy']:.2f} "
+        f"(not docking). "
+    )
+    if layer4["real_docking_kcal_mol"] is not None:
+        rationale += f"Real docking: {layer4['real_docking_kcal_mol']:.2f} kcal/mol. "
     rationale += f"Toxicity: {layer4['toxicity_risk']}. "
     rationale += f"Novelty: {layer4['novelty_score']:.2f}"
     if red_flags:
@@ -737,7 +785,10 @@ def rank_candidates(reports):
             "validation_status": report["validation_status"],
             "recommendation": report["recommendation"],
             "clinical_score": report["layer_4_clinical_score"]["clinical_score"],
-            "binding_affinity": report["layer_4_clinical_score"]["binding_affinity"],
+            "estimated_affinity_proxy": report["layer_4_clinical_score"]["estimated_affinity_proxy"],
+            "real_docking_kcal_mol": report["layer_4_clinical_score"]["real_docking_kcal_mol"],
+            "binding_signal_source": report["layer_4_clinical_score"]["binding_signal_source"],
+            "binding_signal_status": report["layer_4_clinical_score"]["binding_signal_status"],
             "molecular_weight": report["layer_2_lipinski"]["molecular_weight"],
             "qed_score": report["layer_3_drug_properties"]["qed_score"],
             "sa_score": report["layer_3_drug_properties"]["sa_score"],
@@ -800,11 +851,21 @@ def save_results(reports, ranked_df, output_dir="outputs"):
         f.write("TOP 10 CANDIDATES:\n")
         f.write("-" * 80 + "\n")
         for i, row in ranked_df.head(10).iterrows():
+            mw_value = f"{row['molecular_weight']:.1f}" if pd.notna(row["molecular_weight"]) else "N/A"
+            qed_value = f"{row['qed_score']:.3f}" if pd.notna(row["qed_score"]) else "N/A"
+            sa_value = f"{row['sa_score']:.2f}" if pd.notna(row["sa_score"]) else "N/A"
             f.write(f"\n#{i+1} | Clinical Score: {row['clinical_score']:.3f}")
             f.write(f" | {row['recommendation']}\n")
             f.write(f"    SMILES: {row['smiles']}\n")
-            f.write(f"    Binding: {row['binding_affinity']:.2f} kcal/mol\n")
-            f.write(f"    MW: {row['molecular_weight']:.1f} | QED: {row['qed_score']:.3f} | SA: {row['sa_score']:.2f}\n")
+            f.write(
+                f"    Heuristic binding proxy: {row['estimated_affinity_proxy']:.2f} "
+                f"(not docking)\n"
+            )
+            if pd.notna(row["real_docking_kcal_mol"]):
+                f.write(f"    Real docking: {row['real_docking_kcal_mol']:.2f} kcal/mol\n")
+            else:
+                f.write("    Real docking: not run\n")
+            f.write(f"    MW: {mw_value} | QED: {qed_value} | SA: {sa_value}\n")
             f.write(f"    Toxicity: {row['toxicity_risk']}\n")
             if row['red_flags'] != "None":
                 f.write(f"    ⚠️  {row['red_flags']}\n")

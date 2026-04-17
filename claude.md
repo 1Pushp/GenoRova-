@@ -937,3 +937,41 @@ Based on everything above, build in this exact order:
 8. src/vision/structure_visualizer.py  — visualize structures
 9. src/vision/protein_analyzer.py     — protein binding
 10. src/vision/binding_site_detector.py — binding sites
+
+# GenorovaAI Working Rules
+
+## Project purpose
+GenorovaAI is being upgraded from a molecule generator into a drug-candidate validation platform.
+
+## Scientific priorities
+Every strong candidate should be evaluated across:
+1. Chemical sanity
+2. Target engagement
+3. ADMET/safety
+4. Clinical utility
+
+## Non-negotiable rules
+- Never present proxy scores as real experimental truth.
+- Clearly label fallback, estimated, mock, or unavailable values.
+- Keep code modular and documented.
+- Prefer typed Python and structured outputs.
+- Do not hardcode scientific outputs.
+- Keep the interface understandable to non-technical faculty.
+
+## Desired modules
+- validation/chemistry
+- validation/binding
+- validation/admet
+- validation/clinical
+
+## Expected outputs
+For each candidate molecule, show:
+- SA score
+- novelty status
+- PAINS result
+- docking comparison vs reference
+- key residue interactions
+- hepatotoxicity risk
+- hERG risk
+- CYP interaction risk
+- final recommendation with plain-language explanation

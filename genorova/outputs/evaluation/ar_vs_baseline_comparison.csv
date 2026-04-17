@@ -1,0 +1,37 @@
+model,smiles,valid,unique,novel,molecular_weight,qed_score,sa_score,passes_lipinski,filter_status
+AR (SMILESVAE_AR),CCc1ccsc1C(=O)NC,True,True,True,169.25,0.7166,2.2238,True,filtered_in
+AR (SMILESVAE_AR),CCOC=O,True,True,True,74.08,0.4366,3.0432,True,rejected
+AR (SMILESVAE_AR),C=CN,True,True,True,43.07,0.4088,3.7858,True,rejected
+AR (SMILESVAE_AR),CNC1=CC1,True,True,True,69.11,0.4723,3.6643,True,rejected
+AR (SMILESVAE_AR),CCOC,True,False,True,60.1,0.4315,1.9457,True,rejected
+AR (SMILESVAE_AR),Br,True,True,True,80.91,0.3997,6.964,True,rejected
+AR (SMILESVAE_AR),CN1CCC1,True,True,True,71.12,0.3973,1.4454,True,rejected
+AR (SMILESVAE_AR),COC,True,False,True,46.07,0.38,1.9569,True,rejected
+AR (SMILESVAE_AR),CS,True,True,True,48.11,0.3795,4.4454,True,rejected
+AR (SMILESVAE_AR),C=S,True,True,True,46.09,0.3602,4.7277,True,rejected
+AR (SMILESVAE_AR),CC=O,True,True,True,44.05,0.355,3.041,True,rejected
+AR (SMILESVAE_AR),C=C=O,True,True,True,42.04,0.3487,4.0542,True,rejected
+AR (SMILESVAE_AR),BCC,True,True,True,41.89,0.336,3.7425,True,rejected
+AR (SMILESVAE_AR),C#C,True,False,True,26.04,0.3329,4.7806,True,rejected
+AR (SMILESVAE_AR),CCO,True,True,True,46.07,0.4068,1.9803,True,rejected
+AR (SMILESVAE_AR),CCN,True,True,True,45.08,0.4062,2.1742,True,rejected
+AR (SMILESVAE_AR),COC=O,True,True,True,60.05,0.3912,2.9491,True,rejected
+AR (SMILESVAE_AR),CO,True,True,True,32.04,0.3853,2.701,True,rejected
+AR (SMILESVAE_AR),CN,True,False,True,31.06,0.3847,2.9959,True,rejected
+AR (SMILESVAE_AR),CBN,True,True,True,42.88,0.3583,6.0526,True,rejected
+AR (SMILESVAE_AR),CC,True,False,True,30.07,0.3728,2.7476,True,rejected
+AR (SMILESVAE_AR),NC=O,True,True,True,45.04,0.3523,3.5489,True,rejected
+AR (SMILESVAE_AR),C=CC,True,True,True,42.08,0.3571,3.0068,True,rejected
+AR (SMILESVAE_AR),CNC,True,True,True,45.09,0.3987,2.2161,True,rejected
+AR (SMILESVAE_AR),CNC(N)BO,True,True,True,87.92,0.2647,5.6513,True,rejected
+AR (SMILESVAE_AR),O=S,True,True,True,48.07,0.3724,4.0579,True,rejected
+AR (SMILESVAE_AR),C=O,True,True,True,30.03,0.3606,4.0436,True,rejected
+AR (SMILESVAE_AR),B1=CC1,True,True,True,37.86,0.3305,6.2616,True,rejected
+AR (SMILESVAE_AR),BC,True,False,True,27.86,0.3188,4.9549,True,rejected
+AR (SMILESVAE_AR),BF,True,True,True,31.83,0.3157,5.253,True,rejected
+AR (SMILESVAE_AR),BN,True,True,True,28.85,0.3214,4.9024,True,rejected
+AR (SMILESVAE_AR),BOC=O,True,True,True,57.84,0.2766,4.5946,True,rejected
+Baseline (Old VAE),CC(C)NCC(CCC1CC=CC=CC1)C(N)=O,True,True,True,250.39,0.7287,3.4896,True,filtered_in
+Baseline (Old VAE),CC1=C(CCCOC(C)O)C1C,True,True,True,170.25,0.3887,3.7273,True,rejected
+Baseline (Old VAE),C#CC1(CC2CCC2O)CC2=C1C1C(=O)C1CC(C)CC2,True,True,True,284.4,0.6247,5.153,True,filtered_in
+Baseline (Old VAE),CCCCCC1CC(=O)CC(CCCC)C1C1CO1,True,True,True,266.42,0.4821,3.833,True,rejected

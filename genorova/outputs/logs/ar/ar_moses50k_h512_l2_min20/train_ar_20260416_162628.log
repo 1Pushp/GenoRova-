@@ -1,0 +1,41 @@
+2026-04-16 16:26:28,001 [INFO] ============================================================
+2026-04-16 16:26:28,004 [INFO] Genorova AR VAE Training
+2026-04-16 16:26:28,004 [INFO] dataset=moses  epochs=100  batch=256  device=cpu
+2026-04-16 16:26:28,004 [INFO] run=ar_moses50k_h512_l2_min20  hidden=512  layers=2  embed=128  min_generation_length=20
+2026-04-16 16:26:28,004 [INFO] ============================================================
+2026-04-16 16:26:28,005 [INFO] Loading dataset: moses (max_samples=50000)
+2026-04-16 16:27:15,763 [INFO] Loaded 50000 molecules.
+2026-04-16 16:27:15,801 [INFO] Vocabulary size: 29
+2026-04-16 16:27:15,801 [INFO] Vocabulary saved to C:\Users\pushp\OneDrive\Desktop\organic chemistry\genorova\outputs\models\ar\ar_moses50k_h512_l2_min20\vocab.json
+2026-04-16 16:27:15,811 [INFO] SMILES length: max_observed=56  model_max_length=102
+2026-04-16 16:27:15,812 [INFO] Encoding 50000 SMILES to one-hot (this may take a moment)...
+2026-04-16 16:27:19,809 [INFO] Split: train=45000  val=5000
+2026-04-16 16:27:20,119 [INFO] Model parameters: 6665117
+2026-04-16 16:33:47,867 [INFO] Epoch 1  batch 50/176  loss=1.0471 recon=1.0471 kl=1.7108
+2026-04-16 16:39:32,383 [INFO] Epoch 1  batch 100/176  loss=0.7973 recon=0.7973 kl=2.2004
+2026-04-16 16:45:39,198 [INFO] Epoch 1  batch 150/176  loss=0.6832 recon=0.6832 kl=2.4173
+2026-04-16 16:49:27,193 [INFO] Epoch 1/100 | train=1.0195 recon=1.0195 kl=1.9010 | val=0.6461 | kl_w=0.000 | lr=0.001000 | 1320.7s | sanity=6.2%
+2026-04-16 16:49:27,194 [INFO]   sample SMILES: ['C)c1Cl)C(C)C(C)CC1CC1', 'F)(F)c1OCCOCC1CC1CC1', 'C(=O)NCc2ccccc2)c1Cl', 'O)C(=O)Nc1ccccc1Cl)CC1', 'COC(=O)c1ccccc1)C1CCCCC1', 'F)c(F)c12)C1CC1CCC1C', 'F)(F)c1F)C(C)CC1CCCC1', 'C(=O)Nc2ccccc2Cl)c1=O']
+2026-04-16 16:49:27,454 [INFO] New best val_loss=0.6461 — saved best checkpoint.
+2026-04-16 16:55:09,984 [INFO] Epoch 2  batch 50/176  loss=0.6203 recon=0.6101 kl=1.0203
+2026-04-16 17:00:06,665 [INFO] Epoch 2  batch 100/176  loss=0.5850 recon=0.5751 kl=0.9898
+2026-04-16 17:05:00,695 [INFO] Epoch 2  batch 150/176  loss=0.5576 recon=0.5476 kl=0.9990
+2026-04-16 17:08:13,195 [INFO] Epoch 2/100 | train=0.6038 recon=0.5925 kl=1.1279 | val=0.5228 | kl_w=0.010 | lr=0.001000 | 1125.7s
+2026-04-16 17:08:13,383 [INFO] New best val_loss=0.5228 — saved best checkpoint.
+2026-04-16 17:13:29,845 [INFO] Epoch 3  batch 50/176  loss=0.5140 recon=0.4969 kl=0.8561
+2026-04-16 17:19:31,602 [INFO] Epoch 3  batch 100/176  loss=0.5164 recon=0.4992 kl=0.8573
+2026-04-16 17:24:50,456 [INFO] Epoch 3  batch 150/176  loss=0.4777 recon=0.4608 kl=0.8466
+2026-04-16 17:27:50,273 [INFO] Epoch 3/100 | train=0.5133 recon=0.4959 kl=0.8661 | val=0.4602 | kl_w=0.020 | lr=0.001000 | 1176.9s
+2026-04-16 17:27:50,466 [INFO] New best val_loss=0.4602 — saved best checkpoint.
+2026-04-16 17:33:08,272 [INFO] Epoch 4  batch 50/176  loss=0.4790 recon=0.4549 kl=0.8032
+2026-04-16 17:37:54,746 [INFO] Epoch 4  batch 100/176  loss=0.4668 recon=0.4428 kl=0.8006
+2026-04-16 17:42:44,032 [INFO] Epoch 4  batch 150/176  loss=0.4509 recon=0.4270 kl=0.7972
+2026-04-16 17:45:41,651 [INFO] Epoch 4/100 | train=0.4686 recon=0.4446 kl=0.7993 | val=0.4213 | kl_w=0.030 | lr=0.001000 | 1071.2s
+2026-04-16 17:45:41,836 [INFO] New best val_loss=0.4213 — saved best checkpoint.
+2026-04-16 17:51:54,021 [INFO] Epoch 5  batch 50/176  loss=0.4613 recon=0.4309 kl=0.7590
+2026-04-16 17:57:11,419 [INFO] Epoch 5  batch 100/176  loss=0.4255 recon=0.3952 kl=0.7570
+2026-04-16 18:02:03,843 [INFO] Epoch 5  batch 150/176  loss=0.4194 recon=0.3892 kl=0.7555
+2026-04-16 18:05:05,994 [INFO] Epoch 5/100 | train=0.4379 recon=0.4077 kl=0.7551 | val=0.4008 | kl_w=0.040 | lr=0.001000 | 1163.8s | sanity=50.0%
+2026-04-16 18:05:05,995 [INFO]   sample SMILES: ['F)c2ccccc21)C1CCCC1=O', 'F)F)n12CCOCC1CC1C1CC1', 'O)o23)c1FCCOCC1CC1CO', 'CC(=O)c1ccc(NC(=O)C2CC2c2ccccc2)cc1', 'N#CC(=O)Nc1ccc(Cl)c(Cl)c1', 'Cc1cc(Cl)ccc1NCc1nc2ccccc2s1', 'F)F)n21)NC1CC1CC1CC1', 'F)c1nc(N)nc2c1CCCC2=O']
+2026-04-16 18:05:06,165 [INFO] New best val_loss=0.4008 — saved best checkpoint.
+2026-04-16 18:10:58,699 [INFO] Epoch 6  batch 50/176  loss=0.4044 recon=0.3681 kl=0.7268

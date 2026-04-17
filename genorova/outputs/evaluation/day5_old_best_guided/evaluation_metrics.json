@@ -1,0 +1,125 @@
+{
+  "generated_at": "2026-04-15T21:56:48.204794",
+  "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_best.pt",
+  "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes.json",
+  "device": "cpu",
+  "generation_strategy": "guided",
+  "temperature": 0.3,
+  "requested_samples": 25,
+  "reference_source": "dataset:moses",
+  "reference_canonical_size": 1000,
+  "checkpoint_epoch": 83,
+  "checkpoint_best_val_loss": 0.1767134487628937,
+  "checkpoint_stage_name": null,
+  "checkpoint_source_label": null,
+  "checkpoint_mu_std": 0.41036489605903625,
+  "model_max_length": 120,
+  "resolved_vocab_size": 39,
+  "counts": {
+    "total_generated": 25,
+    "valid_rdkit": 1,
+    "invalid_rdkit": 24,
+    "unique_valid": 1,
+    "novel_valid": 1,
+    "novel_unique_valid": 1,
+    "scored_unique_valid": 1
+  },
+  "rates": {
+    "validity_pct": 4.0,
+    "uniqueness_pct_of_valid": 100.0,
+    "novelty_pct_of_valid": 100.0,
+    "novelty_pct_of_unique_valid": 100.0
+  },
+  "length_summary_raw_strings": {
+    "mean": 33.12,
+    "min": 26.0,
+    "max": 41.0
+  },
+  "debug_summary": {
+    "empty_string_count": 0,
+    "invalid_reason_counts": {
+      "unbalanced_parentheses": 18,
+      "ring_closure_mismatch": 4,
+      "unbalanced_brackets": 2
+    },
+    "top_decoded_tokens": {
+      "c": 366,
+      "C": 202,
+      ")": 69,
+      "(": 49,
+      "1": 42,
+      "O": 34,
+      "=": 21,
+      "N": 17,
+      "2": 16,
+      "n": 4
+    },
+    "latent_debug": {
+      "latent_source": "guided",
+      "anchor_count": 1000,
+      "anchor_mu_std": 0.388652,
+      "anchor_mu_mean_abs": 0.324468,
+      "temperature": 0.3
+    }
+  },
+  "property_summary_valid_rows": {
+    "molecular_weight": {
+      "mean": 430.72,
+      "min": 430.72,
+      "max": 430.72
+    },
+    "logp": {
+      "mean": 10.179,
+      "min": 10.179,
+      "max": 10.179
+    },
+    "tpsa": {
+      "mean": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "hbd": {
+      "mean": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "hba": {
+      "mean": 0.0,
+      "min": 0.0,
+      "max": 0.0
+    },
+    "rotatable_bonds": {
+      "mean": 10.0,
+      "min": 10.0,
+      "max": 10.0
+    },
+    "qed_score": {
+      "mean": 0.2387,
+      "min": 0.2387,
+      "max": 0.2387
+    },
+    "sa_score": {
+      "mean": 4.499,
+      "min": 4.499,
+      "max": 4.499
+    }
+  },
+  "scoring_summary_unique_valid": {
+    "average_clinical_score": 0.5059,
+    "best_clinical_score": 0.5059,
+    "top_n": 5
+  },
+  "top_candidates": [
+    {
+      "canonical_smiles": "CCCCCCCCCCC(C)C1C=CC=CC=CC=CC=CC=CC=CC=CCC=C1",
+      "clinical_score": 0.5059,
+      "recommendation": "Borderline",
+      "qed_score": 0.2387,
+      "sa_score": 4.499,
+      "molecular_weight": 430.72,
+      "logp": 10.179,
+      "tpsa": 0.0,
+      "passes_lipinski": false
+    }
+  ]
+}

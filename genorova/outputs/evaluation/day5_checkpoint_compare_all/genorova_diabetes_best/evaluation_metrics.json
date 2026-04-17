@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-04-15T21:57:32.599064",
+  "checkpoint_path": "genorova\\outputs\\models\\diabetes\\genorova_diabetes_best.pt",
+  "vocab_path": "C:\\Users\\pushp\\OneDrive\\Desktop\\organic chemistry\\genorova\\outputs\\vocabulary_diabetes.json",
+  "device": "cpu",
+  "generation_strategy": "guided",
+  "temperature": 0.3,
+  "requested_samples": 25,
+  "reference_source": "dataset:moses",
+  "reference_canonical_size": 1000,
+  "checkpoint_epoch": 83,
+  "checkpoint_best_val_loss": 0.1767134487628937,
+  "checkpoint_stage_name": null,
+  "checkpoint_source_label": null,
+  "checkpoint_mu_std": 0.41036489605903625,
+  "model_max_length": 120,
+  "resolved_vocab_size": 39,
+  "counts": {
+    "total_generated": 25,
+    "valid_rdkit": 0,
+    "invalid_rdkit": 25,
+    "unique_valid": 0,
+    "novel_valid": 0,
+    "novel_unique_valid": 0,
+    "scored_unique_valid": 0
+  },
+  "rates": {
+    "validity_pct": 0.0,
+    "uniqueness_pct_of_valid": 0.0,
+    "novelty_pct_of_valid": 0.0,
+    "novelty_pct_of_unique_valid": 0.0
+  },
+  "length_summary_raw_strings": {
+    "mean": 34.48,
+    "min": 27.0,
+    "max": 41.0
+  },
+  "debug_summary": {
+    "empty_string_count": 0,
+    "invalid_reason_counts": {
+      "unbalanced_parentheses": 20,
+      "ring_closure_mismatch": 3,
+      "rdkit_parse_failure": 1,
+      "long_repetitive_fragment": 1
+    },
+    "top_decoded_tokens": {
+      "c": 437,
+      "C": 155,
+      ")": 75,
+      "(": 56,
+      "1": 35,
+      "O": 35,
+      "2": 20,
+      "=": 15,
+      "N": 14,
+      "n": 7
+    },
+    "latent_debug": {
+      "latent_source": "guided",
+      "anchor_count": 1000,
+      "anchor_mu_std": 0.388652,
+      "anchor_mu_mean_abs": 0.324468,
+      "temperature": 0.3
+    }
+  },
+  "property_summary_valid_rows": {
+    "molecular_weight": null,
+    "logp": null,
+    "tpsa": null,
+    "hbd": null,
+    "hba": null,
+    "rotatable_bonds": null,
+    "qed_score": null,
+    "sa_score": null
+  },
+  "scoring_summary_unique_valid": {
+    "average_clinical_score": null,
+    "best_clinical_score": null,
+    "top_n": 5
+  },
+  "top_candidates": []
+}

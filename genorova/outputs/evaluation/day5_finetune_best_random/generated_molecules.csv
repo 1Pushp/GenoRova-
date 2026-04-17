@@ -1,0 +1,26 @@
+sample_index,raw_smiles,raw_length,first_pad_position,effective_token_ids,canonical_smiles,is_valid_rdkit,is_unique_among_valid,valid_occurrences,is_novel_vs_reference,invalid_reason
+1,CCCCcccCcccccccccCcccCccccccccccccccc,37,37,11 11 11 11 19 19 19 11 19 19 19 19 19 19 19 19 19 11 19 19 19 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+2,CCCCcccccccccccccccccCccccc,27,27,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 11 19 19 19 19 19,,False,False,0,False,low_character_diversity
+3,CCCCccccccccccccccccccccccccccccccc,35,35,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+4,CCCCccccccCccccccccccCcccc,26,26,11 11 11 11 19 19 19 19 19 19 11 19 19 19 19 19 19 19 19 19 19 11 19 19 19 19,,False,False,0,False,low_character_diversity
+5,CC11cccccccccCCCcccc)CccccCccccccc)(c,37,37,11 11 5 5 19 19 19 19 19 19 19 19 19 11 11 11 19 19 19 19 3 11 19 19 19 19 11 19 19 19 19 19 19 19 3 2 19,,False,False,0,False,unbalanced_parentheses
+6,CCCCcc(cccccccccCccccCcCOcCcc,29,29,11 11 11 11 19 19 2 19 19 19 19 19 19 19 19 19 11 19 19 19 19 11 19 11 15 19 11 19 19,,False,False,0,False,unbalanced_parentheses
+7,CCCCcc(Cccccccccccccccccccccccccccccc,37,37,11 11 11 11 19 19 2 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+8,CCCCcCccccccccccCccccccccccccc,30,30,11 11 11 11 19 11 19 19 19 19 19 19 19 19 19 19 11 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+9,CCCCcc(CccccccccCccccCc)ccCCcccc,32,32,11 11 11 11 19 19 2 11 19 19 19 19 19 19 19 19 11 19 19 19 19 11 19 3 19 19 11 11 19 19 19 19,,False,False,0,False,long_repetitive_fragment
+10,CCCCCcccCcc(ccccccccccccccC,27,27,11 11 11 11 11 19 19 19 11 19 19 2 19 19 19 19 19 19 19 19 19 19 19 19 19 19 11,,False,False,0,False,unbalanced_parentheses
+11,CCCCccccccccccccccccccccccccccccccc,35,35,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+12,CCCCc((CCcccccCCCccccccccc,26,26,11 11 11 11 19 2 2 11 11 19 19 19 19 19 11 11 11 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+13,CCCCcccccccccccccccccccccccccccccccc,36,36,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+14,CCCCcccCcccccccccccccCc)ccccccccccc,35,35,11 11 11 11 19 19 19 11 19 19 19 19 19 19 19 19 19 19 19 19 19 11 19 3 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+15,CCCCccccccc(cccccccccCcccc,26,26,11 11 11 11 19 19 19 19 19 19 19 2 19 19 19 19 19 19 19 19 19 11 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+16,CcCCcc(C(cccccCCcccccccccccccCcccccCccc,39,39,11 19 11 11 19 19 2 11 2 19 19 19 19 19 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 11 19 19 19 19 19 11 19 19 19,,False,False,0,False,unbalanced_parentheses
+17,CCCCcccCccccccccCccccccccccccccccccCcc,38,38,11 11 11 11 19 19 19 11 19 19 19 19 19 19 19 19 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 11 19 19,,False,False,0,False,low_character_diversity
+18,CCCCcc(CccccccccCccccCccccCcccccccccc,37,37,11 11 11 11 19 19 2 11 19 19 19 19 19 19 19 19 11 19 19 19 19 11 19 19 19 19 11 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,unbalanced_parentheses
+19,CCCCccCCcccccccccCcccCC)cc,26,26,11 11 11 11 19 19 11 11 19 19 19 19 19 19 19 19 19 11 19 19 19 11 11 3 19 19,,False,False,0,False,unbalanced_parentheses
+20,CCCCcccccccccccccccccCCccc,26,26,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 11 11 19 19 19,,False,False,0,False,low_character_diversity
+21,CCCCcccCccccccccccccccccccccccccccc,35,35,11 11 11 11 19 19 19 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+22,CCC1cccccccccccccccccccccccccccccccccc,38,38,11 11 11 5 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,ring_closure_mismatch
+23,CCCCccccccccccccccccccccccc,27,27,11 11 11 11 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19 19,,False,False,0,False,low_character_diversity
+24,CC1CcccCcccccccCcccccccccccCccccccccc,37,37,11 11 5 11 19 19 19 11 19 19 19 19 19 19 19 11 19 19 19 19 19 19 19 19 19 19 19 11 19 19 19 19 19 19 19 19 19,,False,False,0,False,ring_closure_mismatch
+25,CCCCcccCcCccccccCccccCcccc,26,26,11 11 11 11 19 19 19 11 19 11 19 19 19 19 19 19 11 19 19 19 19 11 19 19 19 19,,False,False,0,False,low_character_diversity

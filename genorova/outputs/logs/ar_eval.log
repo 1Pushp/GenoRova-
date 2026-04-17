@@ -1,0 +1,47 @@
+
+[*] Loading vocabulary from ..\outputs\vocab_ar.json
+   [OK] Vocabulary loaded successfully!
+   [OK] Vocabulary size: 29
+   [OK] Explicit sequence tokens detected: <bos>, <eos>
+
+============================================================
+SMILESVAE (autoregressive decoder)
+============================================================
+  vocab_size  : 29
+  latent_dim  : 256
+  max_length  : 62
+  embed_dim   : 64
+  gru_hidden  : 256  x1 layers
+
+[*] Building Encoder (3-layer, wider)...
+   Input: [batch, 62, 29]
+   Flattened input: 1798
+   Layers: 1798 -> 1024 -> 512 -> 256
+   Output: mu and logvar (both dim 256)
+[*] ARDecoder built: embed=64 hidden=256 layers=1 vocab=29
+  total params: 2,955,869
+
+========================================================================
+GENERATION EVALUATION COMPLETE
+========================================================================
+Requested samples: 500
+Validity:          8.0%
+Top-k:             5
+Rep penalty:       0.75
+Guard strength:    1.0
+Uniqueness:        80.0% of valid
+Novelty:           100.0% of valid
+Filtered pass:     3.12% of unique valid
+Avg score:         0.6725
+Best score:        0.8528
+Artifacts:         ..\outputs\evaluation\ar_eval\generated_molecules.csv
+                   ..\outputs\evaluation\ar_eval\all_valid_candidates.csv
+                   ..\outputs\evaluation\ar_eval\filtered_candidates.csv
+                   ..\outputs\evaluation\ar_eval\top_candidates_report.csv
+                   ..\outputs\evaluation\ar_eval\evaluation_metrics.json
+                   ..\outputs\evaluation\ar_eval\evaluation_summary.md
+                   ..\outputs\evaluation\ar_eval\debug_decoding_samples.csv
+                   ..\outputs\evaluation\ar_eval\debug_summary.json
+                   ..\outputs\evaluation\ar_eval\invalidity_breakdown.json
+                   ..\outputs\evaluation\ar_eval\candidate_filtering_summary.json
+                   ..\outputs\evaluation\ar_eval\candidate_filtering_summary.md

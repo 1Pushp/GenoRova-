@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import tempfile
+import uuid
+from pathlib import Path
+
 
 def test_api_chat_returns_structured_payload(api_client, api_module, monkeypatch):
     monkeypatch.setattr(api_module, "_parse_chat_intent", lambda message: "score")
@@ -24,6 +28,22 @@ def test_api_chat_returns_structured_payload(api_client, api_module, monkeypatch
         }
 
     monkeypatch.setattr(api_module, "_score_smiles_payload", fake_score_smiles_payload)
+    temp_root = Path(tempfile.gettempdir()) / "genorova_chat_tests"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(api_module, "DB_PATH", temp_root / f"molecules_{uuid.uuid4().hex}.db")
+    monkeypatch.setattr(api_module, "AUTH_DB_PATH", temp_root / f"auth_{uuid.uuid4().hex}.db")
+    api_module.CHAT_SESSION_MEMORY.clear()
+
+    signup_response = api_client.post(
+        "/auth/signup",
+        json={
+            "name": "Chat Tester",
+            "email": "chat@example.com",
+            "password": "password123",
+        },
+    )
+
+    assert signup_response.status_code == 200
 
     response = api_client.post(
         "/api/chat",
