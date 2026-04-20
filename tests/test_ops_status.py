@@ -33,3 +33,16 @@ def test_health_and_ops_status_include_runtime_visibility(api_client, api_module
     assert "molecules" in ops_payload["storage"]
     assert "chat_session" in ops_payload["storage"]
     assert "frontend" in ops_payload["storage"]
+
+    ready_response = api_client.get("/ready")
+    assert ready_response.status_code in {200, 503}
+    ready_payload = ready_response.json()
+    assert "ready" in ready_payload
+    assert "checks" in ready_payload
+    assert "version" in ready_payload
+
+    version_response = api_client.get("/version")
+    assert version_response.status_code == 200
+    version_payload = version_response.json()
+    assert version_payload["name"] == "Genorova AI"
+    assert "version" in version_payload

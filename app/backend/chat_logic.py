@@ -4,8 +4,12 @@ from typing import Any
 
 from fastapi import HTTPException
 
-import chat_memory
-import main_legacy_api as legacy_api
+try:
+    from . import chat_memory
+except ImportError:
+    import chat_memory
+
+from genorova.src import api as core_api
 
 
 SMILES_REGEX = re.compile(r"([A-Za-z0-9@+\-\[\]\(\)=#$\\/%.]{3,})")
@@ -314,7 +318,7 @@ def handle_chat_message(message: str, conversation_id: str | None = None) -> dic
 
         if parsed.intent == "best_molecules":
             tool_used = "best_molecules"
-            payload = legacy_api.best_molecules(n=parsed.count or 10)
+            payload = core_api.best_molecules(n=parsed.count or 10)
             content, data = _format_best_reply(payload, parsed)
             message_type = "table"
 
@@ -325,14 +329,14 @@ def handle_chat_message(message: str, conversation_id: str | None = None) -> dic
                     detail='Please include a SMILES string, for example: score "CCO".',
                 )
             tool_used = "score"
-            payload = legacy_api.score(legacy_api.ScoreRequest(smiles=parsed.molecule))
+            payload = core_api.score(core_api.ScoreRequest(smiles=parsed.molecule))
             content, data = _format_score_reply(payload, parsed)
             message_type = "score"
 
         elif parsed.intent == "generate":
             tool_used = "generate"
-            payload = legacy_api.generate(
-                legacy_api.GenerateRequest(
+            payload = core_api.generate(
+                core_api.GenerateRequest(
                     disease=parsed.disease or "diabetes",
                     count=parsed.count or 10,
                 )

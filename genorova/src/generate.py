@@ -57,9 +57,9 @@ from preprocessor import (
 # ============================================================================
 
 # Model and checkpoint
-MODEL_DIR = Path("outputs/models")
-CHECKPOINT_NAME = "genorova_best.pt"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+MODEL_DIR = PROJECT_ROOT / "outputs" / "models"
+CHECKPOINT_NAME = "genorova_best.pt"
 
 # Generation parameters
 NUM_MOLECULES_TO_GENERATE = 100
@@ -106,7 +106,7 @@ MINI_DATASET = [
 ]
 
 # Output paths
-GENERATE_OUTPUT_DIR = Path("outputs/generated")
+GENERATE_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "generated"
 GENERATE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

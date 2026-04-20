@@ -8,21 +8,22 @@ const STORAGE_KEY = "genorova-chat-v11-session";
 
 const defaultStats = {
   total_molecules: 0,
+  best_clinical_score: null,
   best_score: null,
   best_molecule: null,
   best_molecule_note: "No ranked molecule available yet.",
   best_molecular_weight: null,
   prototype_status: "prototype_research_support",
   trust_note:
-    "Computational research-support platform. Active workflow: diabetes / DPP4 / sitagliptin comparator. Outputs are evidence-weighted heuristic and proxy signals only, not experimental proof or clinical validation.",
+    "Computational research-support platform. Active workflow: infection / bacterial carbonic anhydrase / acetazolamide comparator. Outputs are heuristic and proxy signals only, not experimental proof or clinical validation.",
 };
 
 const guidedDemoActions = [
   {
     badge: "Recommended first demo",
     label: "Review ranked candidate set",
-    prompt: "Show the top computational candidates in the active diabetes workflow",
-    description: "Returns the current evidence-weighted candidate set with the validation ledger and trust boundaries.",
+    prompt: "Show the top computational candidates in the active infection workflow",
+    description: "Returns the current ranked candidate set with the validation ledger and trust boundaries.",
   },
   {
     badge: "Plain-language readout",
@@ -45,6 +46,65 @@ const guidedDemoActions = [
 ];
 
 const modeOptions = ["simple", "scientific", "expert"];
+const facultySectionMeta = [
+  {
+    key: "novelty_summary",
+    step: "Step 2",
+    label: "Novelty",
+    tone: "border-amber-200 bg-amber-50/80",
+  },
+  {
+    key: "admet_summary",
+    step: "Step 3",
+    label: "ADMET",
+    tone: "border-emerald-200 bg-emerald-50/80",
+  },
+  {
+    key: "binding_summary",
+    step: "Step 4",
+    label: "Binding",
+    tone: "border-sky-200 bg-sky-50/80",
+  },
+  {
+    key: "decision_summary",
+    step: "Step 5",
+    label: "Final Decision",
+    tone: "border-slate-200 bg-slate-50",
+  },
+];
+
+const facultyRoleMeta = [
+  {
+    key: "supporting_evidence",
+    label: "Supporting evidence",
+    tone: "border-emerald-200 bg-emerald-50/80",
+  },
+  {
+    key: "limiting_evidence",
+    label: "Limiting evidence",
+    tone: "border-amber-200 bg-amber-50/80",
+  },
+  {
+    key: "blocking_evidence",
+    label: "Blocking evidence",
+    tone: "border-rose-200 bg-rose-50/80",
+  },
+  {
+    key: "skipped_or_unavailable_checks",
+    label: "Unavailable or skipped checks",
+    tone: "border-slate-200 bg-slate-100/80",
+  },
+];
+
+const facultyFlowMeta = [
+  {
+    key: "overall_summary",
+    step: "Step 1",
+    label: "Overall Summary",
+    tone: "border-teal-200 bg-white/90",
+  },
+  ...facultySectionMeta,
+];
 
 function buildNetworkError(message) {
   const error = new Error(message);
@@ -299,6 +359,10 @@ function describeAuthIssue(error, authMode = "login") {
 function formatValue(value) {
   if (value === null || value === undefined || value === "") return "Not available";
   if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) {
+    const items = value.map((item) => String(item || "").trim()).filter(Boolean);
+    return items.length ? items.join("; ") : "Not available";
+  }
   return String(value);
 }
 
@@ -310,9 +374,199 @@ function formatLabel(value) {
 
 function recommendationTone(recommendation) {
   const normalized = String(recommendation || "").toLowerCase();
-  if (normalized.includes("strong")) return "border-emerald-300 bg-emerald-50 text-emerald-700";
-  if (normalized.includes("border")) return "border-amber-300 bg-amber-50 text-amber-700";
+  if (normalized.includes("reject") || normalized.includes("block")) return "border-rose-300 bg-rose-50 text-rose-700";
+  if (normalized.includes("strong") || normalized.includes("advance") || normalized.includes("supported")) {
+    return "border-emerald-300 bg-emerald-50 text-emerald-700";
+  }
+  if (normalized.includes("conditional") || normalized.includes("border")) {
+    return "border-amber-300 bg-amber-50 text-amber-700";
+  }
   return "border-slate-300 bg-slate-100 text-slate-700";
+}
+
+function confidenceTone(confidence) {
+  const normalized = String(confidence || "").toLowerCase();
+  if (normalized.includes("high")) return "border-emerald-300 bg-emerald-50 text-emerald-700";
+  if (normalized.includes("medium")) return "border-amber-300 bg-amber-50 text-amber-800";
+  return "border-slate-300 bg-slate-100 text-slate-700";
+}
+
+function statusTone(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized.includes("advance") || normalized.includes("accepted") || normalized.includes("supported")) {
+    return "border-emerald-300 bg-emerald-50 text-emerald-700";
+  }
+  if (normalized.includes("reject") || normalized.includes("block")) {
+    return "border-rose-300 bg-rose-50 text-rose-700";
+  }
+  if (normalized.includes("conditional") || normalized.includes("uncertain")) {
+    return "border-amber-300 bg-amber-50 text-amber-800";
+  }
+  return "border-slate-300 bg-slate-100 text-slate-700";
+}
+
+function formatMetric(value, digits = 2) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric.toFixed(digits);
+  return formatValue(value);
+}
+
+function formatSignedMetric(value, digits = 2) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return `${numeric >= 0 ? "+" : ""}${numeric.toFixed(digits)}`;
+  return formatValue(value);
+}
+
+function formatTagValue(value) {
+  if (value === null || value === undefined || value === "") return "Not available";
+  return typeof value === "string" ? formatLabel(value) : formatValue(value);
+}
+
+function cleanItems(items) {
+  const source = Array.isArray(items) ? items : items ? [items] : [];
+  return Array.from(new Set(source.map((item) => String(item || "").trim()).filter(Boolean)));
+}
+
+function isRenderableValue(value) {
+  if (value === null || value === undefined || value === "") return false;
+  return typeof value !== "object" || Array.isArray(value);
+}
+
+function pointerGroups(pointerBundle) {
+  if (!pointerBundle || typeof pointerBundle !== "object") return [];
+  return [
+    { key: "summary_sources", label: "Summary sources" },
+    { key: "supporting_sources", label: "Supporting sources" },
+    { key: "limiting_sources", label: "Limiting sources" },
+    { key: "blocking_sources", label: "Blocking sources" },
+    { key: "skipped_sources", label: "Skipped sources" },
+  ]
+    .map((group) => ({ ...group, items: cleanItems(pointerBundle[group.key]) }))
+    .filter((group) => group.items.length);
+}
+
+function getFacultyExplanation(payload) {
+  return payload?.candidate?.faculty_explanation || payload?.validation?.faculty_explanation || null;
+}
+
+function collectFacultyHighlights(explanation, sourceKeys, limit = 3) {
+  const highlights = [];
+  const seen = new Set();
+
+  facultySectionMeta.forEach(({ key }) => {
+    const section = explanation?.[key];
+    sourceKeys.forEach((sourceKey) => {
+      cleanItems(section?.[sourceKey]).forEach((item) => {
+        if (highlights.length >= limit || seen.has(item)) return;
+        seen.add(item);
+        highlights.push(item);
+      });
+    });
+  });
+
+  return highlights;
+}
+
+function buildFacultySummary(candidate, validation, explanation, fallbackSummary) {
+  const overallSummary = explanation?.overall_summary || fallbackSummary || "No overall faculty summary is available.";
+  const candidateStatus = candidate?.final_decision || validation?.final_decision || candidate?.validation_status;
+  const confidenceTier =
+    candidate?.decision_confidence_tier ||
+    validation?.decision_confidence_tier ||
+    candidate?.confidence_level ||
+    validation?.confidence_level;
+  const finalRecommendation = candidate?.recommendation || candidate?.final_decision || validation?.final_decision;
+  const strengths = collectFacultyHighlights(explanation, ["supporting_evidence"]);
+  const limitations = collectFacultyHighlights(
+    explanation,
+    ["blocking_evidence", "limiting_evidence", "skipped_or_unavailable_checks"],
+  );
+
+  return {
+    overallSummary,
+    candidateStatus,
+    confidenceTier,
+    finalRecommendation,
+    strengths: strengths.length ? strengths : ["No clear supporting evidence was highlighted in the current explanation stack."],
+    limitations: limitations.length
+      ? limitations
+      : ["No explicit limiting or blocking checks were highlighted in the current explanation stack."],
+  };
+}
+
+function facultyFactsForSection(candidate, validation, sectionKey) {
+  switch (sectionKey) {
+    case "novelty_summary":
+      return [
+        { label: "Status", value: candidate?.novelty_status, formatter: formatTagValue },
+        { label: "Closest reference", value: candidate?.novelty_closest_reference, formatter: formatValue },
+        {
+          label: "Tanimoto / threshold",
+          value:
+            candidate?.novelty_tanimoto_score !== null &&
+            candidate?.novelty_tanimoto_score !== undefined &&
+            candidate?.novelty_threshold !== null &&
+            candidate?.novelty_threshold !== undefined
+              ? `${formatMetric(candidate?.novelty_tanimoto_score)} / ${formatMetric(candidate?.novelty_threshold)}`
+              : null,
+          formatter: formatValue,
+        },
+      ].filter((fact) => fact.value !== null && fact.value !== undefined && fact.value !== "");
+    case "admet_summary":
+      return [
+        { label: "Safety label", value: candidate?.overall_safety_flag, formatter: formatTagValue },
+        {
+          label: "Evidence level",
+          value: candidate?.admet_evidence_level || validation?.admet_evidence_level || candidate?.evidence_level,
+          formatter: formatTagValue,
+        },
+        {
+          label: "DILI / hERG / CYP",
+          value:
+            candidate?.hepatotoxicity_risk || candidate?.herg_risk || candidate?.cyp_interaction_risk
+              ? `${formatTagValue(candidate?.hepatotoxicity_risk)} / ${formatTagValue(candidate?.herg_risk)} / ${formatTagValue(candidate?.cyp_interaction_risk)}`
+              : null,
+          formatter: formatValue,
+        },
+      ].filter((fact) => fact.value !== null && fact.value !== undefined && fact.value !== "");
+    case "binding_summary":
+      return [
+        { label: "Binding claim", value: candidate?.binding_claim || candidate?.binding_mode || candidate?.docking_mode, formatter: formatTagValue },
+        {
+          label: "Delta vs comparator",
+          value:
+            candidate?.delta_vs_reference !== null && candidate?.delta_vs_reference !== undefined
+              ? formatSignedMetric(candidate?.delta_vs_reference)
+              : null,
+          formatter: formatValue,
+        },
+        { label: "Evidence level", value: candidate?.binding_evidence_level, formatter: formatTagValue },
+      ].filter((fact) => fact.value !== null && fact.value !== undefined && fact.value !== "");
+    case "decision_summary":
+      return [
+        {
+          label: "Final decision",
+          value: candidate?.final_decision || validation?.final_decision,
+          formatter: formatTagValue,
+        },
+        {
+          label: "Confidence tier",
+          value:
+            candidate?.decision_confidence_tier ||
+            validation?.decision_confidence_tier ||
+            candidate?.confidence_level ||
+            validation?.confidence_level,
+          formatter: formatTagValue,
+        },
+        {
+          label: "Evidence level",
+          value: candidate?.decision_evidence_level || validation?.decision_evidence_level || candidate?.evidence_level,
+          formatter: formatTagValue,
+        },
+      ].filter((fact) => fact.value !== null && fact.value !== undefined && fact.value !== "");
+    default:
+      return [];
+  }
 }
 
 function CopyButton({ value, label = "Copy SMILES" }) {
@@ -355,7 +609,7 @@ function MoleculeVisual({ svg, smiles, compact = false }) {
 }
 
 function PropertySection({ title, data }) {
-  const entries = Object.entries(data || {}).filter(([, value]) => value !== null && value !== undefined && value !== "");
+  const entries = Object.entries(data || {}).filter(([, value]) => isRenderableValue(value));
   if (!entries.length) return null;
 
   return (
@@ -561,8 +815,10 @@ function CandidateHero({ candidate }) {
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl bg-white/90 p-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Evidence-Weighted Score</div>
-              <div className="mt-2 text-xl font-semibold text-slate-900">{formatValue(candidate.score)}</div>
+              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Clinical Score</div>
+              <div className="mt-2 text-xl font-semibold text-slate-900">
+                {formatValue(candidate.score ?? candidate.clinical_score)}
+              </div>
             </div>
             <div className="rounded-2xl bg-white/90 p-4">
               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Candidate Label</div>
@@ -570,7 +826,9 @@ function CandidateHero({ candidate }) {
             </div>
             <div className="rounded-2xl bg-white/90 p-4">
               <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Current Decision</div>
-              <div className="mt-2 text-sm font-semibold text-slate-900">{formatValue(candidate.validation_status || candidate.recommendation)}</div>
+              <div className="mt-2 text-sm font-semibold text-slate-900">
+                {formatValue(candidate.final_decision || candidate.validation_status || candidate.recommendation)}
+              </div>
             </div>
           </div>
           {candidate.confidence_note ? (
@@ -585,32 +843,586 @@ function CandidateHero({ candidate }) {
   );
 }
 
-function ComparisonSection({ comparison }) {
-  if (!comparison?.molecules?.length) return null;
+function FacultyHighlights({ title, items, tone = "default" }) {
+  const tones = {
+    default: "border-slate-200 bg-white",
+    support: "border-emerald-200 bg-emerald-50/80",
+    limit: "border-amber-200 bg-amber-50/80",
+  };
+
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Comparison</div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        {comparison.molecules.map((molecule) => (
-          <div key={`${molecule.label}-${molecule.smiles}`} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-slate-900">{molecule.label}</div>
-              <CopyButton value={molecule.smiles} label="Copy" />
-            </div>
-            <div className="mt-4">
-              <MoleculeVisual svg={molecule.molecule_svg} smiles={molecule.smiles} compact />
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-700">
-              <div>Model score: {formatValue(molecule.clinical_score)}</div>
-              <div>QED: {formatValue(molecule.qed_score)}</div>
-              <div>LogP: {formatValue(molecule.logp)}</div>
-              <div>MW: {formatValue(molecule.molecular_weight)}</div>
+    <div className={`rounded-[24px] border p-4 ${tones[tone] || tones.default}`}>
+      <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{title}</div>
+      <div className="mt-3 space-y-2">
+        {items.map((item, index) => (
+          <div key={`${title}-${index}`} className="rounded-2xl bg-white/90 px-3 py-2 text-sm leading-6 text-slate-700">
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FacultyReviewFlowStrip({ className = "" }) {
+  return (
+    <div className={className}>
+      <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Review order</div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        {facultyFlowMeta.map((item) => (
+          <div key={item.key} className={`rounded-[20px] border px-3 py-3 shadow-sm ${item.tone}`}>
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">{item.step}</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">{item.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FacultyMetaBadge({ label, value, tone, formatter = formatTagValue }) {
+  if (value === null || value === undefined || value === "") return null;
+  const tones = {
+    status: statusTone(value),
+    confidence: confidenceTone(value),
+    recommendation: recommendationTone(value),
+    default: "border-slate-300 bg-slate-100 text-slate-700",
+  };
+
+  return (
+    <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${tones[tone] || tones.default}`}>
+      <span>{label}: </span>
+      <span className="ml-1">{formatter(value)}</span>
+    </div>
+  );
+}
+
+function FacultySnapshotCard({
+  candidate,
+  validation,
+  explanation,
+  fallbackSummary,
+  title = "Faculty review snapshot",
+}) {
+  const summary = buildFacultySummary(candidate, validation, explanation, fallbackSummary);
+  const mainStrength = summary.strengths[0];
+  const mainLimitation = summary.limitations[0];
+
+  return (
+    <div className="rounded-[24px] border border-teal-100 bg-white px-4 py-4 text-sm text-slate-700 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-teal-700">{title}</div>
+        <div className="flex flex-wrap gap-2">
+          <FacultyMetaBadge label="Status" value={summary.candidateStatus} tone="status" />
+          <FacultyMetaBadge label="Confidence" value={summary.confidenceTier} tone="confidence" />
+        </div>
+      </div>
+
+      <div className="mt-3 leading-6">{summary.overallSummary}</div>
+
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        {mainStrength ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-3 py-2">
+            <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700">Main strength</div>
+            <div className="mt-1 leading-6 text-slate-700">{mainStrength}</div>
+          </div>
+        ) : null}
+        {mainLimitation ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-2">
+            <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-800">Main limitation</div>
+            <div className="mt-1 leading-6 text-slate-700">{mainLimitation}</div>
+          </div>
+        ) : null}
+      </div>
+
+      {summary.finalRecommendation ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <FacultyMetaBadge label="Recommendation" value={summary.finalRecommendation} tone="recommendation" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TraceabilityDetails({ pointerBundle }) {
+  const groups = pointerGroups(pointerBundle);
+  if (!groups.length) return null;
+
+  return (
+    <details className="mt-4 rounded-[22px] border border-slate-200 bg-white/70 p-4">
+      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Show traceability sources
+      </summary>
+      <div className="mt-3 grid gap-3">
+        {groups.map((group) => (
+          <div key={group.key} className="rounded-2xl border border-slate-200 bg-slate-50/90 p-3">
+            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{group.label}</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {group.items.map((item) => (
+                <span
+                  key={`${group.key}-${item}`}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 font-mono text-[11px] text-slate-600"
+                >
+                  {item}
+                </span>
+              ))}
             </div>
           </div>
         ))}
       </div>
-      <div className="mt-4 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-800">
-        {comparison.why}
+    </details>
+  );
+}
+
+function FacultyRoleGroup({ label, items, tone }) {
+  return (
+    <div className={`rounded-[24px] border p-4 ${tone}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-600">{label}</div>
+        <div className="rounded-full border border-white/90 bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+          {items.length}
+        </div>
+      </div>
+      <div className="mt-3 space-y-2">
+        {items.map((item, index) => (
+          <div key={`${label}-${index}`} className="rounded-2xl bg-white/90 px-3 py-2 text-sm leading-6 text-slate-700 shadow-sm">
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FacultySummaryPanel({ payload }) {
+  const explanation = getFacultyExplanation(payload);
+  const summary = buildFacultySummary(payload?.candidate, payload?.validation, explanation, payload?.summary);
+
+  return (
+    <section className="mt-6 rounded-[30px] border border-teal-200 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-6 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.24em] text-teal-700">Faculty Review Summary</div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <div className="rounded-full border border-teal-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-teal-700">
+              Step 1
+            </div>
+            <div className="text-2xl font-semibold text-slate-900">Overall Summary</div>
+          </div>
+        </div>
+        <div className={`rounded-full border px-3 py-1 text-xs font-semibold ${recommendationTone(summary.finalRecommendation)}`}>
+          {formatTagValue(summary.finalRecommendation)}
+        </div>
+      </div>
+
+      <FacultyReviewFlowStrip className="mt-5 rounded-[26px] border border-white bg-white/80 p-4 shadow-sm" />
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1.2fr,0.8fr]">
+        <div>
+          <div className="rounded-[26px] border border-white bg-white/90 p-5 shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Overall summary</div>
+            <div className="mt-3 text-sm leading-7 text-slate-700">{summary.overallSummary}</div>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <FacultyHighlights title="Main strengths" items={summary.strengths} tone="support" />
+            <FacultyHighlights title="Main limitations" items={summary.limitations} tone="limit" />
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+          <div className="rounded-[24px] border border-white bg-white/90 p-4 shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Candidate status</div>
+            <div className={`mt-3 inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${statusTone(summary.candidateStatus)}`}>
+              {formatTagValue(summary.candidateStatus)}
+            </div>
+          </div>
+          <div className="rounded-[24px] border border-white bg-white/90 p-4 shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Confidence tier</div>
+            <div className={`mt-3 inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${confidenceTone(summary.confidenceTier)}`}>
+              {formatTagValue(summary.confidenceTier)}
+            </div>
+          </div>
+          <div className="rounded-[24px] border border-white bg-white/90 p-4 shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Final recommendation</div>
+            <div className="mt-3 text-sm font-semibold text-slate-900">{formatTagValue(summary.finalRecommendation)}</div>
+            <div className="mt-2 text-sm leading-6 text-slate-600">
+              {explanation?.decision_summary?.summary || "Decision explanation will appear here when available."}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-teal-200 bg-white/80 px-4 py-3 text-sm leading-6 text-slate-700">
+        Evidence-weighted view only: Genorova combines computed descriptors, comparator-based screening, and heuristic or
+        proxy signals. The result is not experimental proof or clinical validation.
+      </div>
+
+      <TraceabilityDetails pointerBundle={explanation?.overall_summary_provenance_pointers} />
+    </section>
+  );
+}
+
+function FacultyExplanationStack({ candidate, validation, explanation }) {
+  if (!explanation) return null;
+
+  return (
+    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Detailed Explanation Flow</div>
+          <div className="mt-2 text-sm text-slate-600">
+            Step 1 appears above as the overall summary. The detailed review continues below in the same report order.
+          </div>
+        </div>
+        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+          Ordered for faculty review
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4">
+        {facultySectionMeta.map((meta) => {
+          const section = explanation?.[meta.key];
+          if (!section) return null;
+          const facts = facultyFactsForSection(candidate, validation, meta.key);
+          const roleGroups = facultyRoleMeta
+            .map((role) => ({
+              ...role,
+              items: cleanItems(section?.[role.key]),
+            }))
+            .filter((role) => role.items.length);
+
+          return (
+            <div key={meta.key} className={`rounded-[28px] border p-5 ${meta.tone}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">{meta.step}</div>
+                  <div className="mt-2 text-lg font-semibold text-slate-900">{meta.label}</div>
+                </div>
+                {facts.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {facts.map((fact) => (
+                      <div key={`${meta.key}-${fact.label}`} className="rounded-full border border-white bg-white/90 px-3 py-1.5 text-xs text-slate-700 shadow-sm">
+                        <span className="font-semibold">{fact.label}:</span> {fact.formatter ? fact.formatter(fact.value) : formatValue(fact.value)}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-4 text-sm leading-7 text-slate-700">{section.summary || "No summary available."}</div>
+
+              {roleGroups.length ? (
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {roleGroups.map((role) => (
+                    <FacultyRoleGroup key={`${meta.key}-${role.key}`} label={role.label} items={role.items} tone={role.tone} />
+                  ))}
+                </div>
+              ) : null}
+
+              <TraceabilityDetails pointerBundle={section?.provenance_pointers} />
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function comparisonParticipants(comparison) {
+  const molecules = Array.isArray(comparison?.molecules) ? comparison.molecules : [];
+  return {
+    molecules,
+    leftMolecule: molecules[0] || null,
+    rightMolecule: molecules[1] || null,
+    presentation: comparison?.comparison_presentation || null,
+  };
+}
+
+function comparisonSectionPayload(presentation, sectionKey) {
+  switch (sectionKey) {
+    case "novelty_summary":
+      return presentation?.comparison_sections?.novelty || null;
+    case "admet_summary":
+      return presentation?.comparison_sections?.admet || null;
+    case "binding_summary":
+      return presentation?.comparison_sections?.binding || null;
+    case "decision_summary":
+      return presentation?.comparison_sections?.final_decision || null;
+    default:
+      return null;
+  }
+}
+
+function ComparisonConclusionPanel({ presentation }) {
+  if (!presentation?.preferred_candidate) return null;
+  const preferredSummary =
+    presentation?.preferred_candidate?.side === "left"
+      ? presentation?.left_candidate_summary
+      : presentation?.right_candidate_summary;
+  const confidenceLimits = cleanItems(presentation?.confidence_limits);
+
+  return (
+    <div className="rounded-[30px] border border-teal-200 bg-gradient-to-br from-teal-50 via-white to-cyan-50 p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.24em] text-teal-700">Comparison Conclusion</div>
+          <div className="mt-3 text-2xl font-semibold text-slate-900">Top comparison outcome</div>
+        </div>
+        <div className="rounded-full border border-teal-200 bg-white px-4 py-2 text-sm font-semibold text-teal-800">
+          Preferred: {presentation?.preferred_candidate?.label || "Preferred candidate"}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        <div className="rounded-[24px] border border-white bg-white/90 p-4 shadow-sm">
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Preferred candidate</div>
+          <div className="mt-3 text-lg font-semibold text-slate-900">{presentation?.preferred_candidate?.label || "Preferred candidate"}</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <FacultyMetaBadge label="Status" value={preferredSummary?.candidate_status} tone="status" />
+            <FacultyMetaBadge label="Confidence" value={preferredSummary?.confidence_tier} tone="confidence" />
+          </div>
+        </div>
+        <div className="rounded-[24px] border border-white bg-white/90 p-4 shadow-sm lg:col-span-2">
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Why it is preferred</div>
+          <div className="mt-3 text-sm leading-7 text-slate-700">
+            {presentation?.preferred_reason || "The comparison reason is not available."}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-amber-200 bg-amber-50/80 p-4">
+        <div className="text-xs font-bold uppercase tracking-[0.18em] text-amber-800">What still limits confidence</div>
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {(confidenceLimits.length
+            ? confidenceLimits
+            : ["Current preference remains limited by the available screening evidence rather than experimental confirmation."]).map((item, index) => (
+            <div key={`comparison-limit-${index}`} className="rounded-2xl border border-white/90 bg-white/90 px-3 py-2 text-sm leading-6 text-slate-700">
+              {item}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {presentation?.full_comparison_note ? (
+        <details className="mt-4 rounded-[22px] border border-white/90 bg-white/80 p-4">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Show full comparison note
+          </summary>
+          <div className="mt-3 text-sm leading-7 text-slate-700">{presentation.full_comparison_note}</div>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ComparisonCandidateSummaryCard({ molecule, summary, isPreferred = false }) {
+  if (!summary) return null;
+
+  return (
+    <div className={`rounded-[30px] border bg-white p-5 shadow-sm ${isPreferred ? "border-teal-200" : "border-slate-200"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">{summary?.label || molecule?.label || "Candidate"}</div>
+          <div className="mt-2 text-lg font-semibold text-slate-900">{formatTagValue(summary?.final_recommendation)}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {isPreferred ? (
+            <div className="rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-teal-700">
+              Preferred
+            </div>
+          ) : null}
+          {molecule?.smiles ? <CopyButton value={molecule.smiles} label="Copy" /> : null}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[220px,1fr]">
+        <MoleculeVisual svg={molecule?.molecule_svg} smiles={molecule?.smiles} compact />
+        <div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Clinical score</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">
+                {formatValue(molecule?.clinical_score)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">QED</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{formatValue(molecule?.qed_score)}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">LogP</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{formatValue(molecule?.logp)}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">MW</div>
+              <div className="mt-1 text-sm font-semibold text-slate-900">{formatValue(molecule?.molecular_weight)}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <FacultyMetaBadge label="Status" value={summary?.candidate_status} tone="status" />
+            <FacultyMetaBadge label="Confidence" value={summary?.confidence_tier} tone="confidence" />
+            <FacultyMetaBadge label="Recommendation" value={summary?.final_recommendation} tone="recommendation" />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+        <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Overall summary</div>
+        <div className="mt-3 text-sm leading-7 text-slate-700">{summary?.overall_summary || "No summary available."}</div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <FacultyHighlights title="Main strengths" items={summary?.main_strengths || []} tone="support" />
+        <FacultyHighlights title="Main limitations" items={summary?.main_limitations || []} tone="limit" />
+      </div>
+
+      <TraceabilityDetails pointerBundle={summary?.overall_summary_provenance_pointers} />
+    </div>
+  );
+}
+
+function ComparisonSectionDetailCard({ molecule, meta, sectionPayload }) {
+  const section = sectionPayload?.section;
+  if (!section) return null;
+
+  const facts = facultyFactsForSection(molecule, null, meta.key);
+  const roleGroups = facultyRoleMeta
+    .map((role) => ({
+      ...role,
+      items: cleanItems(section?.[role.key]),
+    }))
+    .filter((role) => role.items.length);
+
+  return (
+    <div className={`rounded-[28px] border p-5 ${meta.tone} ${sectionPayload?.is_preferred ? "ring-1 ring-teal-200" : ""}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-semibold text-slate-900">{sectionPayload?.label || molecule?.label || "Candidate"}</div>
+          {sectionPayload?.is_preferred ? (
+            <div className="rounded-full border border-teal-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-teal-700">
+              Preferred
+            </div>
+          ) : null}
+        </div>
+        {facts.length ? (
+          <div className="flex flex-wrap gap-2">
+            {facts.map((fact) => (
+              <div key={`${molecule?.label}-${meta.key}-${fact.label}`} className="rounded-full border border-white bg-white/90 px-3 py-1.5 text-xs text-slate-700 shadow-sm">
+                <span className="font-semibold">{fact.label}:</span> {fact.formatter ? fact.formatter(fact.value) : formatValue(fact.value)}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-4 text-sm leading-7 text-slate-700">{section.summary || "No summary available."}</div>
+
+      {roleGroups.length ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {roleGroups.map((role) => (
+            <FacultyRoleGroup key={`${molecule?.label}-${meta.key}-${role.key}`} label={role.label} items={role.items} tone={role.tone} />
+          ))}
+        </div>
+      ) : null}
+
+      <TraceabilityDetails pointerBundle={section?.provenance_pointers} />
+    </div>
+  );
+}
+
+function ComparisonSectionRow({ meta, leftMolecule, rightMolecule, sectionPayload }) {
+  if (!sectionPayload) return null;
+
+  return (
+    <div className="rounded-[30px] border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.22em] text-slate-500">{sectionPayload?.step || meta.step}</div>
+          <div className="mt-2 text-xl font-semibold text-slate-900">{sectionPayload?.title || meta.label}</div>
+        </div>
+        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+          Parallel comparison
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <ComparisonSectionDetailCard
+          key={`${meta.key}-left-${leftMolecule?.label}-${leftMolecule?.smiles}`}
+          molecule={leftMolecule}
+          meta={meta}
+          sectionPayload={sectionPayload?.left_candidate}
+        />
+        <ComparisonSectionDetailCard
+          key={`${meta.key}-right-${rightMolecule?.label}-${rightMolecule?.smiles}`}
+          molecule={rightMolecule}
+          meta={meta}
+          sectionPayload={sectionPayload?.right_candidate}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ComparisonSection({ comparison }) {
+  const { leftMolecule, rightMolecule, presentation } = comparisonParticipants(comparison);
+  if (!leftMolecule || !rightMolecule) return null;
+  if (!presentation) {
+    return (
+      <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Structured Comparison Review</div>
+        <div className="mt-3 text-sm leading-7 text-slate-600">
+          Comparison presentation data was not available for this response.
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Structured Comparison Review</div>
+          <div className="mt-2 text-sm text-slate-600">
+            Both candidates follow the same faculty reading order so the comparison stays parallel and easy to scan.
+          </div>
+        </div>
+        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+          Two-candidate faculty view
+        </div>
+      </div>
+
+      <FacultyReviewFlowStrip className="mt-5 rounded-[26px] border border-slate-200 bg-slate-50/80 p-4" />
+
+      <div className="mt-5">
+        <ComparisonConclusionPanel presentation={presentation} />
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <ComparisonCandidateSummaryCard
+          key={`comparison-summary-left-${leftMolecule?.label}-${leftMolecule?.smiles}`}
+          molecule={leftMolecule}
+          summary={presentation?.left_candidate_summary}
+          isPreferred={presentation?.preferred_candidate?.side === "left"}
+        />
+        <ComparisonCandidateSummaryCard
+          key={`comparison-summary-right-${rightMolecule?.label}-${rightMolecule?.smiles}`}
+          molecule={rightMolecule}
+          summary={presentation?.right_candidate_summary}
+          isPreferred={presentation?.preferred_candidate?.side === "right"}
+        />
+      </div>
+
+      <div className="mt-5 space-y-4">
+        {facultySectionMeta.map((meta) => (
+          <ComparisonSectionRow
+            key={`comparison-row-${meta.key}`}
+            meta={meta}
+            leftMolecule={leftMolecule}
+            rightMolecule={rightMolecule}
+            sectionPayload={comparisonSectionPayload(presentation, meta.key)}
+          />
+        ))}
       </div>
     </section>
   );
@@ -640,11 +1452,20 @@ function GeneratedCandidatesSection({ molecules }) {
                   </div>
                 </div>
                 <div className="mt-4 grid gap-3 text-sm text-slate-700 sm:grid-cols-4">
-                  <div>Evidence-weighted score: {formatValue(molecule.clinical_score)}</div>
+                  <div>Clinical score: {formatValue(molecule.clinical_score)}</div>
                   <div>MW: {formatValue(molecule.molecular_weight)}</div>
                   <div>LogP: {formatValue(molecule.logp)}</div>
                   <div>QED: {formatValue(molecule.qed_score)}</div>
                 </div>
+                {molecule?.faculty_explanation?.overall_summary ? (
+                  <div className="mt-4">
+                    <FacultySnapshotCard
+                      candidate={molecule}
+                      explanation={molecule.faculty_explanation}
+                      fallbackSummary={molecule.summary}
+                    />
+                  </div>
+                ) : null}
                 {molecule.confidence_note ? (
                   <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     {molecule.confidence_note}
@@ -684,6 +1505,8 @@ function QuickActions({ actions, onPrompt }) {
 }
 
 function AssistantCard({ payload, onFollowUp }) {
+  const facultyExplanation = getFacultyExplanation(payload);
+
   return (
     <div className="w-full max-w-4xl rounded-[32px] border border-slate-200 bg-white/96 p-4 shadow-[0_24px_90px_-40px_rgba(15,23,42,0.35)] backdrop-blur sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -703,18 +1526,12 @@ function AssistantCard({ payload, onFollowUp }) {
         </a>
       </div>
 
-      <section className="mt-6 rounded-[28px] bg-[radial-gradient(circle_at_top,_rgba(13,148,136,0.16),_transparent_45%),linear-gradient(135deg,#082f49,#0f172a_55%,#111827)] p-6 text-white">
-        <div className="text-xs font-bold uppercase tracking-[0.24em] text-teal-200">Summary</div>
-        <div className="mt-4 text-base leading-7 text-slate-100">{payload.summary || "No summary returned."}</div>
-        <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-slate-200">
-          Evidence-weighted view only: Genorova combines computed descriptors, comparator-based screening, and
-          heuristic or proxy signals. The result is not experimental proof or clinical validation.
-        </div>
-      </section>
+      <FacultySummaryPanel payload={payload} />
 
       <div className="mt-6 space-y-5">
         <ResultEmptyState payload={payload} onFollowUp={onFollowUp} />
         <CandidateHero candidate={payload.candidate} />
+        <FacultyExplanationStack candidate={payload.candidate} validation={payload.validation} explanation={facultyExplanation} />
         {payload.why ? (
           <section className="rounded-[28px] border border-slate-200 bg-slate-50/90 p-5">
             <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-500">Why This Was Selected</div>
@@ -724,11 +1541,6 @@ function AssistantCard({ payload, onFollowUp }) {
         {payload.candidate?.smiles || payload.generated_candidates?.length ? (
           <QuickActions actions={payload.follow_up_actions} onPrompt={onFollowUp} />
         ) : null}
-        <PropertySection title="Trust & Validation" data={payload.trust} />
-        <PropertySection title="Validation Ledger" data={payload.validation} />
-        <PropertySection title="Chemical Properties" data={payload.chemical_properties} />
-        <PropertySection title="Physical Properties" data={payload.physical_properties} />
-        <PropertySection title="Pharmacological Profile" data={payload.pharmacology} />
         <ComparisonSection comparison={payload.comparison} />
         <GeneratedCandidatesSection molecules={payload.generated_candidates} />
         <ListSection title="Strengths" items={payload.strengths} />
@@ -736,6 +1548,11 @@ function AssistantCard({ payload, onFollowUp }) {
         <ListSection title="Limitations" items={payload.limitations} tone="warn" />
         <ListSection title="Optimization Suggestions" items={payload.optimization_suggestions} />
         <ListSection title="Recommended Next Steps" items={payload.next_steps} />
+        <PropertySection title="Trust & Validation" data={payload.trust} />
+        <PropertySection title="Validation Ledger" data={payload.validation} />
+        <PropertySection title="Chemical Properties" data={payload.chemical_properties} />
+        <PropertySection title="Physical Properties" data={payload.physical_properties} />
+        <PropertySection title="Pharmacological Profile" data={payload.pharmacology} />
         <ListSection title="Scientific Responsibility" items={payload.warnings} tone="danger" />
       </div>
     </div>
@@ -774,14 +1591,14 @@ function EmptyState({ stats, onPromptClick, previewOnly = false }) {
             <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Step 1</div>
             <div className="mt-2 text-sm font-semibold text-slate-900">Run the ranked-candidate demo</div>
             <div className="mt-2 text-sm leading-6 text-slate-600">
-              Start with the active diabetes workflow so the first response returns a candidate and evidence ledger.
+              Start with the active infection workflow so the first response returns a candidate and evidence ledger.
             </div>
           </div>
           <div className="rounded-[24px] border border-white bg-white/90 p-4">
             <div className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Step 2</div>
             <div className="mt-2 text-sm font-semibold text-slate-900">Read the candidate and validation ledger</div>
             <div className="mt-2 text-sm leading-6 text-slate-600">
-              Focus on SA, novelty, comparator delta, docking mode, safety flags, and the final decision.
+              Focus on SA, novelty, comparator delta, binding claim, safety flags, and the final decision.
             </div>
           </div>
           <div className="rounded-[24px] border border-white bg-white/90 p-4">
@@ -819,7 +1636,7 @@ function EmptyState({ stats, onPromptClick, previewOnly = false }) {
         </div>
         <div className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-sm">
           <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Live Visuals</div>
-          <div className="mt-3 text-3xl font-semibold text-slate-900">{formatValue(stats.best_score)}</div>
+          <div className="mt-3 text-3xl font-semibold text-slate-900">{formatValue(stats.best_clinical_score ?? stats.best_score)}</div>
           <div className="mt-2 text-sm text-slate-600">Backend-generated SVG structures for generated, scored, and compared molecules.</div>
         </div>
         <div className="rounded-[28px] border border-slate-200 bg-white p-5 text-left shadow-sm">
@@ -1286,8 +2103,8 @@ export default function GenorovaChatAppV11() {
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
               <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 backdrop-blur">
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Top Ranked Score</div>
-                <div className="mt-3 text-2xl font-semibold text-white">{formatValue(stats.best_score)}</div>
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Top Clinical Score</div>
+                <div className="mt-3 text-2xl font-semibold text-white">{formatValue(stats.best_clinical_score ?? stats.best_score)}</div>
               </div>
               <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 backdrop-blur">
                 <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Molecules</div>

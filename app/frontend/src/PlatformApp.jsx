@@ -6,6 +6,7 @@ const API_PREFIX = API_BASE_URL ? `${API_BASE_URL}/api` : "/api";
 
 const defaultStats = {
   total_molecules: 0,
+  best_clinical_score: null,
   best_score: null,
   best_molecule: null,
   best_molecular_weight: null,
@@ -17,7 +18,7 @@ const apiExamples = [
   { label: "GET /health", snippet: "GET /health" },
   {
     label: "POST /generate",
-    snippet: 'POST /generate\n{\n  "disease": "diabetes",\n  "count": 10\n}',
+    snippet: 'POST /generate\n{\n  "disease": "infection",\n  "count": 10\n}',
   },
   {
     label: "POST /score",
@@ -93,7 +94,7 @@ function PropertyGrid({ scoreData }) {
     ["QED", scoreData.qed_score],
     ["SA Score", scoreData.sa_score],
     ["Lipinski", scoreData.passes_lipinski ? "Pass" : "Fail"],
-    ["Model Score", scoreData.clinical_score],
+    ["Clinical Score", scoreData.clinical_score],
   ];
 
   return (
@@ -111,7 +112,7 @@ function PropertyGrid({ scoreData }) {
 export default function PlatformApp() {
   const [stats, setStats] = useState(defaultStats);
   const [generateForm, setGenerateForm] = useState({
-    disease: "diabetes",
+    disease: "infection",
     count: 20,
     referenceSmiles: "",
   });
@@ -238,7 +239,7 @@ export default function PlatformApp() {
   const bestMoleculeProperties = useMemo(
     () => [
       ["SMILES", stats.best_molecule],
-      ["Model Score", formatNumber(stats.best_score, 4)],
+      ["Clinical Score", formatNumber(stats.best_clinical_score ?? stats.best_score, 4)],
       ["Molecular Weight", stats.best_molecular_weight ? `${stats.best_molecular_weight} Da` : "-"],
       ["Validation", "Computational ranking only"],
       ["Status", stats.prototype_status || "prototype_research_support"],
@@ -271,8 +272,8 @@ export default function PlatformApp() {
               <div className="mt-2 text-sm text-slate-300">molecules</div>
             </div>
             <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur transition hover:border-teal-400/30 hover:bg-white/10">
-              <div className="text-3xl font-semibold text-white">{formatNumber(stats.best_score, 4)}</div>
-              <div className="mt-2 text-sm text-slate-300">best score</div>
+              <div className="text-3xl font-semibold text-white">{formatNumber(stats.best_clinical_score ?? stats.best_score, 4)}</div>
+              <div className="mt-2 text-sm text-slate-300">best clinical score</div>
             </div>
             <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur transition hover:border-teal-400/30 hover:bg-white/10">
               <div className="text-3xl font-semibold text-white">{stats.prototype_status || "prototype"}</div>
@@ -299,7 +300,7 @@ export default function PlatformApp() {
                     onChange={(event) => updateGenerateForm("disease", event.target.value)}
                     className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none ring-0 transition focus:border-teal-400"
                   >
-                    <option value="diabetes" className="text-slate-900">Diabetes</option>
+                    <option value="diabetes" className="text-slate-900">Diabetes (archived)</option>
                     <option value="infection" className="text-slate-900">Infectious Disease</option>
                   </select>
                 </div>
@@ -371,7 +372,7 @@ export default function PlatformApp() {
                         <th className="px-4 py-3">SMILES</th>
                         <th className="px-4 py-3">MW</th>
                         <th className="px-4 py-3">QED</th>
-                        <th className="px-4 py-3">Model Score</th>
+                        <th className="px-4 py-3">Clinical Score</th>
                         <th className="px-4 py-3">Recommendation</th>
                         <th className="px-4 py-3">Validation</th>
                         <th className="px-4 py-3">Actions</th>
@@ -488,7 +489,7 @@ export default function PlatformApp() {
                 <div className="mt-8 grid gap-4 sm:grid-cols-3">
                   <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
                     <div className="text-sm text-slate-400">Score</div>
-                    <div className="mt-2 text-2xl font-semibold text-white">{formatNumber(stats.best_score, 4)}</div>
+                    <div className="mt-2 text-2xl font-semibold text-white">{formatNumber(stats.best_clinical_score ?? stats.best_score, 4)}</div>
                   </div>
                   <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
                     <div className="text-sm text-slate-400">Validation</div>

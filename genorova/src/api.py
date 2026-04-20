@@ -4,6 +4,7 @@ Genorova AI — FastAPI Web Service
 
 REST API for the Genorova computational molecule analysis platform.
 Exposes conservative ranked-molecule retrieval, scoring, and reporting over HTTP.
+Canonical production entrypoint: `app/backend/main.py`.
 
 ENDPOINTS:
     GET  /health           — service status
@@ -13,7 +14,7 @@ ENDPOINTS:
     GET  /report           — HTML discovery report
 
 USAGE:
-    python -m uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload
+    python -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 AUTHOR: Pushp Dwivedi | pushpdwivedi911@gmail.com
 DATE:   April 2026
@@ -29,7 +30,9 @@ import sys
 import tempfile
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import auth_store
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -48,6 +52,8 @@ from science_evidence import (
     ACTIVE_REFERENCE_DRUG,
     ACTIVE_SCOPE_NOTE,
     ACTIVE_TARGET,
+    build_comparison_presentation,
+    build_faculty_explanation_stack,
     evaluate_candidate,
     evaluate_candidate_rows,
 )
@@ -74,6 +80,14 @@ AUTH_COOKIE_NAME = "genorova_session"
 AUTH_COOKIE_MAX_AGE_SECONDS = auth_store.SESSION_TTL_DAYS * 24 * 60 * 60
 LOGGER = logging.getLogger("genorova.api")
 LOG_LEVEL_NAME = os.getenv("GENOROVA_LOG_LEVEL", "INFO").strip().upper()
+APP_VERSION = os.getenv("GENOROVA_VERSION", "1.0.0").strip() or "1.0.0"
+GENERATION_MODE_REAL = "real_generation"
+GENERATION_MODE_CURATED = "curated_library_mode"
+GENERATION_SAMPLE_MULTIPLIER = 6
+GENERATION_SAMPLE_FLOOR = 40
+GENERATION_SAMPLE_CAP = 120
+GENERATION_PROBE_FLOOR = 20
+GENERATION_PROBE_CAP = 24
 STARTUP_STATE: dict[str, Any] = {
     "initialized": False,
     "started_at": None,
@@ -107,6 +121,130 @@ AUTH_DB_PATH = _default_auth_db_path()
 def _json_log(level: int, event: str, **fields: Any) -> None:
     payload = {"event": event, **fields}
     LOGGER.log(level, json.dumps(payload, default=str, sort_keys=True))
+
+
+def _public_url() -> str | None:
+    configured = os.getenv("GENOROVA_PUBLIC_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+
+    render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+    if render_hostname:
+        return f"https://{render_hostname}"
+
+    return None
+
+
+def _allowed_origins() -> list[str]:
+    configured = os.getenv("GENOROVA_ALLOWED_ORIGINS", "").strip()
+    if configured:
+        origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+    else:
+        origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+        public_url = _public_url()
+        if public_url:
+            origins.append(public_url)
+
+    deduped: list[str] = []
+    for origin in origins:
+        if origin not in deduped:
+            deduped.append(origin)
+    return deduped
+
+
+def _binding_truth_fields(raw_mode: str | None) -> dict[str, str]:
+    """Map internal binding-path labels to the public truth surface."""
+    mode = str(raw_mode or "unavailable")
+    if mode == "real_docking":
+        return {
+            "binding_truth": "REAL_DOCKING",
+            "binding_mode_public": "real_docking",
+            "binding_claim": "real docking",
+        }
+    if mode in {"fallback_proxy", "scaffold_proxy"}:
+        return {
+            "binding_truth": "PREDICTED_OFFLINE",
+            "binding_mode_public": "predicted_offline",
+            "binding_claim": "predicted binding (Vina-validated offline)",
+        }
+    return {
+        "binding_truth": "UNAVAILABLE",
+        "binding_mode_public": "unavailable",
+        "binding_claim": "binding unavailable",
+    }
+
+
+def _public_candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Return the API-safe molecule payload with one public score field."""
+    public = dict(candidate or {})
+    clinical_score = public.get("clinical_score", public.get("rank_score"))
+    public["clinical_score"] = _safe_float(clinical_score, default=0.0)
+
+    raw_mode = public.get("binding_mode") or public.get("docking_mode")
+    binding_truth = _binding_truth_fields(raw_mode)
+    public["binding_path_mode_raw"] = raw_mode or "unavailable"
+    public["binding_truth"] = binding_truth["binding_truth"]
+    public["binding_claim"] = binding_truth["binding_claim"]
+    public["binding_mode"] = binding_truth["binding_mode_public"]
+    public["docking_mode"] = binding_truth["binding_mode_public"]
+
+    if public["binding_truth"] == "PREDICTED_OFFLINE":
+        existing_reason = str(public.get("binding_mode_reason") or "").strip()
+        if not existing_reason.lower().startswith("predicted binding (vina-validated offline):"):
+            public["binding_mode_reason"] = (
+                f"Predicted binding (Vina-validated offline): live docking did not run for this request. {existing_reason}".strip()
+            )
+
+    binding_provenance = public.get("binding_provenance")
+    if isinstance(binding_provenance, dict):
+        normalized_provenance = dict(binding_provenance)
+        normalized_provenance["binding_path_mode_raw"] = raw_mode or "unavailable"
+        normalized_provenance["binding_truth"] = binding_truth["binding_truth"]
+        normalized_provenance["binding_mode"] = binding_truth["binding_mode_public"]
+        normalized_provenance["binding_claim"] = binding_truth["binding_claim"]
+        public["binding_provenance"] = normalized_provenance
+
+    validation = public.get("validation")
+    if isinstance(validation, dict):
+        normalized_validation = dict(validation)
+        normalized_validation["clinical_score"] = public["clinical_score"]
+        normalized_validation["binding_path_mode_raw"] = raw_mode or "unavailable"
+        normalized_validation["binding_truth"] = binding_truth["binding_truth"]
+        normalized_validation["binding_mode"] = binding_truth["binding_mode_public"]
+        normalized_validation["docking_mode"] = binding_truth["binding_mode_public"]
+        if isinstance(public.get("binding_provenance"), dict):
+            normalized_validation["binding_provenance"] = public["binding_provenance"]
+        public["validation"] = normalized_validation
+
+    public.pop("rank_score", None)
+    public.pop("model_score", None)
+    public.pop("legacy_clinical_score", None)
+    return public
+
+
+def _public_generation_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a user-facing generation payload with honest mode labeling."""
+    public = dict(payload or {})
+    generation_mode = public.get("generation_mode")
+    public["generation_truth"] = (
+        "REAL"
+        if generation_mode == GENERATION_MODE_REAL
+        else "LABELED_LIBRARY"
+    )
+    public["molecules"] = [
+        _public_candidate_payload(candidate)
+        for candidate in list(public.get("molecules") or [])
+    ]
+    trust = dict(public.get("trust") or {})
+    if generation_mode:
+        trust["generation_mode"] = generation_mode
+    if public.get("generation_truth"):
+        trust["generation_truth"] = public["generation_truth"]
+    public["trust"] = trust
+    return public
 
 
 def _redact_email(email: str | None) -> str | None:
@@ -188,6 +326,16 @@ def _frontend_status() -> dict[str, Any]:
     }
 
 
+def _chat_storage_status() -> dict[str, Any] | None:
+    backend_chat_memory = sys.modules.get("chat_memory") or sys.modules.get("app.backend.chat_memory")
+    if backend_chat_memory is None:
+        try:
+            from app.backend import chat_memory as backend_chat_memory
+        except Exception:
+            return None
+    return backend_chat_memory.get_storage_status()
+
+
 def _ops_status_payload() -> dict[str, Any]:
     auth_status = _auth_storage_status()
     molecule_status = _molecule_storage_status()
@@ -225,26 +373,7 @@ def _ops_status_payload() -> dict[str, Any]:
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
-app = FastAPI(
-    title       = "Genorova AI — Computational Molecule Analysis API",
-    description = (
-        "Prototype research-support API for computational molecule scoring, "
-        "comparison, and conservative ranked-molecule retrieval. Outputs are "
-        "not experimentally validated and should not be treated as treatment advice."
-    ),
-    version     = "1.0.0",
-    contact     = {
-        "name":  "Pushp Dwivedi",
-        "email": "pushpdwivedi911@gmail.com",
-    },
-)
-
-if FRONTEND_ASSETS_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS_DIR)), name="frontend-assets")
-
-
-@app.on_event("startup")
-def startup() -> None:
+def _initialize_runtime_state() -> None:
     STARTUP_STATE["started_at"] = datetime.now().isoformat()
     try:
         auth_store.init_db(AUTH_DB_PATH)
@@ -267,6 +396,38 @@ def startup() -> None:
         STARTUP_STATE["warnings"] = ["auth_storage_initialization_failed"]
         LOGGER.exception("Auth storage initialization failed during startup.")
 
+
+@asynccontextmanager
+async def _app_lifespan(_: FastAPI):
+    _initialize_runtime_state()
+    yield
+
+
+app = FastAPI(
+    title       = "Genorova AI — Computational Molecule Analysis API",
+    description = (
+        "Prototype research-support API for computational molecule scoring, "
+        "comparison, and conservative ranked-molecule retrieval. Outputs are "
+        "not experimentally validated and should not be treated as treatment advice."
+    ),
+    version     = APP_VERSION,
+    contact     = {
+        "name":  "Pushp Dwivedi",
+        "email": "pushpdwivedi911@gmail.com",
+    },
+    lifespan    = _app_lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+if FRONTEND_ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS_DIR)), name="frontend-assets")
 
 @app.middleware("http")
 async def log_request_outcomes(request: Request, call_next):
@@ -477,13 +638,30 @@ def _trust_block(
 def _reference_smiles_for_disease(disease: str) -> list[str]:
     """Return a small safe fallback reference set when generated candidates are unavailable."""
     disease = disease.lower()
-    if disease == ACTIVE_DISEASE:
-        try:
-            from scorer import APPROVED_DIABETES_DRUGS
-            return list(APPROVED_DIABETES_DRUGS.values())
-        except Exception:
-            return []
-    return []
+    try:
+        from validation.reference_data import KNOWN_TARGETS, REFERENCE_DRUGS
+
+        smiles: list[str] = []
+        seen: set[str] = set()
+
+        active_reference = REFERENCE_DRUGS.get(ACTIVE_REFERENCE_DRUG)
+        if disease == ACTIVE_DISEASE and active_reference:
+            seen.add(active_reference)
+            smiles.append(active_reference)
+
+        for info in KNOWN_TARGETS.values():
+            if str(info.get("disease", "")).lower() != disease:
+                continue
+            reference_name = str(info.get("reference_drug") or "").strip().lower()
+            reference_smiles = REFERENCE_DRUGS.get(reference_name)
+            if not reference_smiles or reference_smiles in seen:
+                continue
+            seen.add(reference_smiles)
+            smiles.append(reference_smiles)
+
+        return smiles
+    except Exception:
+        return []
 
 
 def _best_available_smiles() -> str | None:
@@ -538,6 +716,167 @@ def _fallback_reference_candidates(disease: str, count: int) -> list[dict[str, A
     return fallback_rows[:count]
 
 
+def _generation_sample_size(count: int) -> int:
+    """Choose a bounded live-generation sample size."""
+    return min(
+        max(int(count) * GENERATION_SAMPLE_MULTIPLIER, GENERATION_SAMPLE_FLOOR),
+        GENERATION_SAMPLE_CAP,
+    )
+
+
+def _generation_probe_size(count: int) -> int:
+    """Choose a smaller probe size used to test backend viability."""
+    return min(
+        max(int(count) * 2, GENERATION_PROBE_FLOOR),
+        GENERATION_PROBE_CAP,
+    )
+
+
+def _generation_backend_specs() -> list[dict[str, Any]]:
+    """Return the ordered list of generation backends to probe."""
+    return [
+        {
+            "name": "infection_vae",
+            "label": "infection VAE checkpoint",
+            "factory": "MoleculeGenerator",
+            "checkpoint": MODELS_DIR / "infection" / "genorova_infection_best.pt",
+            "batch_size": None,
+        },
+        {
+            "name": "smilesvae_ar",
+            "label": "autoregressive SMILESVAE checkpoint",
+            "factory": "ARMoleculeGenerator",
+            "checkpoint": MODELS_DIR / "ar" / "smilesvae_ar_best.pt",
+            "batch_size": 20,
+        },
+    ]
+
+
+@lru_cache(maxsize=4)
+def _cached_generator(factory_name: str, checkpoint_path: str):
+    """Load and cache a generation backend so repeated calls stay practical."""
+    from generate import ARMoleculeGenerator, MoleculeGenerator
+
+    checkpoint = Path(checkpoint_path)
+    if factory_name == "ARMoleculeGenerator":
+        return ARMoleculeGenerator(checkpoint_path=str(checkpoint), device="cpu")
+    if factory_name == "MoleculeGenerator":
+        return MoleculeGenerator(checkpoint_path=str(checkpoint), device="cpu")
+    raise ValueError(f"Unsupported generator factory: {factory_name}")
+
+
+def _reset_generator_state(generator: Any) -> None:
+    """Clear mutable counters on cached generator instances before reuse."""
+    for attr in ("valid_count", "invalid_count", "novel_count", "duplicate_count"):
+        if hasattr(generator, attr):
+            setattr(generator, attr, 0)
+    if hasattr(generator, "last_debug_rows"):
+        generator.last_debug_rows = []
+
+
+def _run_generation_backend(spec: dict[str, Any], sample_size: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Execute one backend and return unique SMILES rows plus diagnostics."""
+    checkpoint_path = Path(spec["checkpoint"])
+    diagnostics = {
+        "backend": spec["name"],
+        "label": spec["label"],
+        "checkpoint": str(checkpoint_path),
+        "sample_size": sample_size,
+        "status": "not_run",
+        "valid_smiles": 0,
+        "unique_valid_smiles": 0,
+        "error": None,
+    }
+
+    if not checkpoint_path.exists():
+        diagnostics["status"] = "missing_checkpoint"
+        diagnostics["error"] = f"Checkpoint not found: {checkpoint_path}"
+        return [], diagnostics
+
+    try:
+        generator = _cached_generator(spec["factory"], str(checkpoint_path))
+        _reset_generator_state(generator)
+
+        if spec["factory"] == "ARMoleculeGenerator":
+            df = generator.generate_molecules(
+                num_to_generate=sample_size,
+                batch_size=min(spec.get("batch_size") or sample_size, sample_size),
+            )
+        else:
+            df = generator.generate_molecules(num_to_generate=sample_size)
+    except Exception as exc:
+        diagnostics["status"] = "runtime_failed"
+        diagnostics["error"] = str(exc)
+        return [], diagnostics
+
+    records = df.to_dict(orient="records") if hasattr(df, "to_dict") else []
+    unique_rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in records:
+        smiles = str(row.get("smiles") or "").strip()
+        if not smiles or smiles in seen:
+            continue
+        seen.add(smiles)
+        unique_rows.append({"smiles": smiles})
+
+    diagnostics["valid_smiles"] = len(records)
+    diagnostics["unique_valid_smiles"] = len(unique_rows)
+    diagnostics["status"] = "ready" if unique_rows else "no_valid_smiles"
+    if not unique_rows:
+        diagnostics["error"] = (
+            f"{spec['label']} produced 0 valid SMILES in a live sample of {sample_size} molecules."
+        )
+    return unique_rows, diagnostics
+
+
+def _attempt_runtime_generation(disease: str, count: int) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Try the live generation backends in order and return diagnostics either way."""
+    sample_size = _generation_sample_size(count)
+    probe_size = _generation_probe_size(count)
+    attempts: list[dict[str, Any]] = []
+
+    for index, spec in enumerate(_generation_backend_specs()):
+        run_size = sample_size if index > 0 else probe_size
+        rows, diagnostics = _run_generation_backend(spec, run_size)
+        attempts.append(diagnostics)
+        if not rows:
+            continue
+
+        if run_size < sample_size:
+            rows, diagnostics = _run_generation_backend(spec, sample_size)
+            attempts[-1] = diagnostics
+            if not rows:
+                continue
+
+        return rows, {
+            "attempted": True,
+            "selected_backend": spec["name"],
+            "selected_backend_label": spec["label"],
+            "sample_size": sample_size,
+            "attempts": attempts,
+            "failure_reason": None,
+            "disease": disease,
+        }
+
+    failure_reason = next(
+        (
+            attempt.get("error")
+            for attempt in reversed(attempts)
+            if attempt.get("error")
+        ),
+        "No live generation backend returned a valid SMILES string.",
+    )
+    return [], {
+        "attempted": True,
+        "selected_backend": None,
+        "selected_backend_label": None,
+        "sample_size": sample_size,
+        "attempts": attempts,
+        "failure_reason": failure_reason,
+        "disease": disease,
+    }
+
+
 def _generate_candidates_for_disease(disease: str, count: int) -> dict:
     """Shared generation logic used by both REST and chat endpoints."""
     disease = disease.lower()
@@ -552,9 +891,10 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
             "count_requested": count,
             "generated_at": datetime.now().isoformat(),
             "generation_status": "inactive_science_path",
+            "generation_mode": "inactive_science_path",
             "message": (
-                "This live Genorova surface is currently standardized to the diabetes / DPP4 "
-                "/ sitagliptin comparator workflow. Infection lead stories are not active in this path."
+                f"This live Genorova surface is currently standardized to the {ACTIVE_PROGRAM_LABEL}. "
+                f"Requests for '{disease}' are outside the active science path in this workspace."
             ),
             "molecules": [],
             "trust": _trust_block(
@@ -564,57 +904,81 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
                 fallback_used=False,
                 limitations=[
                     ACTIVE_SCOPE_NOTE,
-                    "Use the active diabetes / DPP4 workflow for the current faculty/demo surface.",
+                    "Use the active program when you want live generation or scoring from this workspace.",
                 ],
-                recommended_next_step="Score or compare molecules inside the active diabetes / DPP4 workflow.",
+                recommended_next_step="Score or compare molecules inside the active Genorova program path.",
             ),
         }
 
-    rows = _load_csv(disease)
-    source_type = "precomputed_ranked_candidates"
-    generation_status = "fallback_to_precomputed_valid_candidates"
-    fallback_used = True
+    live_rows, generation_diagnostics = _attempt_runtime_generation(disease, count)
+    rows = live_rows
+    source_type = "runtime_model_generation"
+    generation_status = "runtime_model_generation"
+    generation_mode = GENERATION_MODE_REAL
+    fallback_used = False
     confidence_note = (
-        "Low confidence for fresh generation: the current product path is returning previously scored valid molecules "
-        "instead of claiming a new valid model-generated candidate run."
+        "Fresh molecules were generated live from the autoregressive model and then revalidated under the active Genorova program."
     )
     limitations = [
-        "These molecules come from previously scored valid outputs rather than a fresh trustworthy generation pass.",
-        "Current generation quality remains limited, so this response is intended for research support and demo safety.",
+        ACTIVE_SCOPE_NOTE,
+        "These molecules are freshly generated computational candidates, not experimentally validated leads.",
+        "Binding remains computational only unless a payload explicitly reports REAL_DOCKING.",
     ]
-    recommended_next_step = "Use the scoring, comparison, and explanation tools on known valid molecules before treating generation as reliable."
+    recommended_next_step = (
+        "Review the freshly generated molecules with scoring, comparison, and structure inspection before any chemistry decision."
+    )
+
+    if not rows:
+        rows = _load_csv(disease)
+        source_type = "precomputed_ranked_candidates"
+        generation_status = GENERATION_MODE_CURATED
+        generation_mode = GENERATION_MODE_CURATED
+        fallback_used = True
+        confidence_note = (
+            "Live generation was attempted first, but no trustworthy runtime candidate set was available. "
+            "Genorova is now labeling the response honestly as curated_library_mode."
+        )
+        limitations = [
+            "Live generation was attempted but did not return a trustworthy candidate set for this request.",
+            "These molecules come from a curated, previously scored library rather than a fresh generation pass.",
+        ]
+        recommended_next_step = (
+            "Treat this as curated library mode and use scoring or comparison before making any synthesis decision."
+        )
 
     if not rows:
         db_rows = _load_db_top(count)
         if db_rows:
             rows = db_rows
             source_type = "database_ranked_candidates"
-            generation_status = "fallback_to_previously_scored_molecules"
+            generation_status = GENERATION_MODE_CURATED
+            generation_mode = GENERATION_MODE_CURATED
             confidence_note = (
-                "No fresh valid candidate set was available, so the API is returning previously scored molecules from the local database."
+                "Live generation did not return a trustworthy candidate set, so the API is surfacing stored scored molecules in curated_library_mode."
             )
             limitations = [
-                "This is a fallback to stored scored molecules, not a fresh generation success.",
-                "Current generative quality remains unreliable, so treat this as an exploratory ranking view.",
+                "This response is sourced from stored scored molecules rather than a fresh generation run.",
+                "Use the runtime generation diagnostics before claiming novel discovery from this endpoint.",
             ]
         else:
             rows = _fallback_reference_candidates(disease, count)
             source_type = "known_reference_fallback"
-            generation_status = "fallback_to_known_reference_molecules" if rows else "no_valid_candidates_available"
+            generation_status = GENERATION_MODE_CURATED if rows else "no_valid_candidates_available"
+            generation_mode = GENERATION_MODE_CURATED if rows else "no_valid_candidates_available"
             confidence_note = (
-                "No valid model-generated candidate was produced in the active path, so the API is falling back to scored known reference molecules."
+                "Live generation did not return a trustworthy candidate set, so the API is falling back to scored reference molecules in curated_library_mode."
                 if rows else
-                "No valid model-generated candidate was available, and no safe fallback molecule set was found for this request."
+                "Live generation produced no trustworthy valid candidate, and no safe curated library fallback was available."
             )
             limitations = [
-                "No fresh valid model-generated candidates were available for this request.",
+                "Live generation produced no trustworthy valid candidates for this request.",
                 "Known references are shown only as safe comparators and not as newly discovered molecules.",
             ] if rows else [
-                "The current generator could not provide a trustworthy valid candidate set.",
-                "No safe fallback molecule list was available for this disease bucket in the current workspace.",
+                "No trustworthy live-generated candidate set was available.",
+                "No safe curated-library fallback was available for this disease bucket in the current workspace.",
             ]
             recommended_next_step = (
-                "Score a known SMILES string or compare known molecules while generation quality is being improved."
+                "Score a known SMILES string or compare known molecules while live generation is being tuned."
             )
 
     if not rows:
@@ -624,6 +988,8 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
             "count_requested": count,
             "generated_at": datetime.now().isoformat(),
             "generation_status": generation_status,
+            "generation_mode": generation_mode,
+            "generation_diagnostics": generation_diagnostics,
             "message": "No valid candidate was produced in this run. The API is returning an honest empty result instead of inventing a molecule.",
             "molecules": [],
             "trust": _trust_block(
@@ -653,9 +1019,15 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
             "count_returned": 0,
             "count_requested": count,
             "generated_at": datetime.now().isoformat(),
-            "generation_status": "all_candidates_rejected_by_active_validation",
+            "generation_status": (
+                "runtime_generated_candidates_rejected_by_active_validation"
+                if generation_mode == GENERATION_MODE_REAL
+                else "curated_candidates_rejected_by_active_validation"
+            ),
+            "generation_mode": generation_mode,
+            "generation_diagnostics": generation_diagnostics,
             "message": (
-                "Candidate rows were available, but the active DPP4 comparator workflow did not find a trustworthy "
+                "Candidate rows were available, but the active Genorova validation workflow did not find a trustworthy "
                 "candidate to display after revalidation."
             ),
             "molecules": [],
@@ -674,6 +1046,15 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
 
     for index, candidate in enumerate(results, 1):
         candidate["rank"] = index
+        _store_molecule(
+            candidate.get("smiles"),
+            candidate.get("qed_score"),
+            candidate.get("sa_score"),
+            candidate.get("molecular_weight"),
+            candidate.get("logp"),
+            candidate.get("clinical_score"),
+            candidate.get("recommendation"),
+        )
 
     return {
         "disease":          disease,
@@ -681,10 +1062,12 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
         "count_requested":  count,
         "generated_at":     datetime.now().isoformat(),
         "generation_status": generation_status,
+        "generation_mode":  generation_mode,
+        "generation_diagnostics": generation_diagnostics,
         "message": (
-            "Showing selectively revalidated molecules from the active DPP4 comparator workflow because fresh generation quality is currently limited."
-            if fallback_used else
-            "Showing selectively revalidated molecules under the active DPP4 comparator workflow."
+            "Showing freshly generated and revalidated molecules from the live autoregressive Genorova path."
+            if generation_mode == GENERATION_MODE_REAL else
+            "Showing curated-library molecules because live generation did not return a trustworthy candidate set in this request."
         ),
         "trust": _trust_block(
             validation_status="canonical_selective_candidate_screen",
@@ -708,10 +1091,12 @@ def _score_smiles_payload(smiles: str) -> dict:
             validation_status="canonical_direct_scoring",
             limitations=[
                 ACTIVE_SCOPE_NOTE,
-                "This score comes from the active DPP4 comparator workflow and remains computational only.",
+                f"This score comes from the active {ACTIVE_PROGRAM_LABEL} workflow and remains computational only.",
                 "Proxy and heuristic fields should not be interpreted as experimental proof or clinical validation.",
             ],
-            recommended_next_step="Compare this molecule with sitagliptin or other known diabetes references before advancing it.",
+            recommended_next_step=(
+                f"Compare this molecule with {ACTIVE_REFERENCE_DRUG} or other program-relevant reference molecules before advancing it."
+            ),
         )
         _store_molecule(
             payload["smiles"],
@@ -900,6 +1285,25 @@ def auth_me(current_user: dict[str, str] = Depends(get_current_user)):
     return {"user": current_user}
 
 
+def _readiness_payload() -> tuple[bool, dict[str, Any]]:
+    ops_status = _ops_status_payload()
+    checks = {
+        "startup_initialized": bool(STARTUP_STATE.get("initialized")),
+        "auth_storage_available": bool(ops_status["storage"]["auth"]["available"]),
+        "frontend_built": bool(ops_status["storage"]["frontend"]["built"]),
+        "cookie_secure": bool(_cookie_secure()),
+    }
+    ready = all(checks.values())
+    return ready, {
+        "status": "ready" if ready else "not_ready",
+        "ready": ready,
+        "timestamp": datetime.now().isoformat(),
+        "version": APP_VERSION,
+        "checks": checks,
+        "degraded_states": ops_status["degraded_states"],
+    }
+
+
 @app.get("/health", summary="Service health check")
 def health():
     """
@@ -919,9 +1323,10 @@ def health():
             pass
 
     stats = api_stats()
-    return {
+    payload = {
         "status":          "running",
-        "model":           "Genorova AI v1.0",
+        "model":           f"Genorova AI v{APP_VERSION}",
+        "version":         APP_VERSION,
         "prototype_status": PROTOTYPE_STATUS,
         "timestamp":       datetime.now().isoformat(),
         "models_loaded": {
@@ -930,6 +1335,7 @@ def health():
         },
         "molecules_in_db": db_count,
         "best_molecule":   stats.get("best_molecule"),
+        "best_clinical_score": stats.get("best_clinical_score", stats.get("best_score")),
         "best_score":      stats.get("best_score"),
         "health_status":   ops_status["status"],
         "degraded_states": ops_status["degraded_states"],
@@ -948,6 +1354,30 @@ def health():
             },
         },
         "trust_note":      "Operational status only. All molecule outputs are computational research-support results and not experimentally validated.",
+    }
+    chat_storage = _chat_storage_status()
+    if chat_storage is not None:
+        payload["chat_storage"] = chat_storage
+    return payload
+
+
+@app.get("/ready", summary="Readiness check for deployment and smoke tests")
+def ready():
+    ready_state, payload = _readiness_payload()
+    status_code = 200 if ready_state else 503
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/version", summary="Release metadata for the running deployment")
+def version():
+    return {
+        "name": "Genorova AI",
+        "version": APP_VERSION,
+        "public_url": _public_url(),
+        "render_service": os.getenv("RENDER_SERVICE_NAME", "").strip() or None,
+        "render_git_commit": os.getenv("RENDER_GIT_COMMIT", "").strip() or None,
+        "render_instance_id": os.getenv("RENDER_INSTANCE_ID", "").strip() or None,
+        "build_timestamp": STARTUP_STATE.get("started_at"),
     }
 
 
@@ -982,7 +1412,7 @@ def generate(req: GenerateRequest):
             result_source=trust.get("result_source"),
             returned=payload.get("count_returned", 0),
         )
-    return payload
+    return _public_generation_payload(payload)
 
 
 @app.post("/api/generate", summary="Return ranked computational molecules (SaaS API)")
@@ -1003,7 +1433,7 @@ def score(req: ScoreRequest):
     - Genorova model score (0–1)
     - A model-ranked prioritization label suitable for exploratory research only
     """
-    return _score_smiles_payload(req.smiles)
+    return _public_candidate_payload(_score_smiles_payload(req.smiles))
 
 
 @app.post("/api/score", summary="Score a molecule (SaaS API)")
@@ -1022,7 +1452,7 @@ def best_molecules(n: int = 10):
     Queries the persistent molecule database that is updated every pipeline run.
     """
     n = min(n, 50)
-    generated = _generate_candidates_for_disease(ACTIVE_DISEASE, n)
+    generated = _public_generation_payload(_generate_candidates_for_disease(ACTIVE_DISEASE, n))
     source = generated.get("trust", {}).get("result_source", "canonical_selective_candidate_screen")
     return {
         "source": source,
@@ -1107,6 +1537,7 @@ def api_stats():
     if total == 0:
         return {
             "total_molecules":    0,
+            "best_clinical_score": None,
             "best_score":         None,
             "best_molecule":      None,
             "best_molecular_weight": None,
@@ -1122,6 +1553,7 @@ def api_stats():
 
     return {
         "total_molecules":        total,
+        "best_clinical_score":    best_score,
         "best_score":             best_score,
         "best_molecule":          best_molecule,
         "best_molecule_label":    _ranking_label(score=best_score),
@@ -1392,85 +1824,347 @@ def _estimate_toxicity_risk(score_payload: dict) -> str:
     return "low"
 
 
+def _novelty_overview(score_payload: dict, validation: dict | None = None) -> dict:
+    """Return stable novelty evidence fields for API/chat payloads."""
+    validation_block = dict(validation or score_payload.get("validation") or {})
+    novelty_provenance = validation_block.get(
+        "novelty_provenance",
+        score_payload.get("novelty_provenance"),
+    )
+    return {
+        "novelty_status": validation_block.get("novelty_status", score_payload.get("novelty_status")),
+        "novelty_closest_reference": validation_block.get(
+            "novelty_closest_reference",
+            score_payload.get("novelty_closest_reference"),
+        ),
+        "novelty_tanimoto_score": validation_block.get(
+            "novelty_tanimoto_score",
+            score_payload.get("novelty_tanimoto_score"),
+        ),
+        "novelty_threshold": validation_block.get(
+            "novelty_threshold",
+            score_payload.get("novelty_threshold"),
+        ),
+        "novelty_reason": validation_block.get("novelty_reason", score_payload.get("novelty_reason")),
+        "novelty_provenance": novelty_provenance,
+        "novelty_provenance_explanation": validation_block.get(
+            "novelty_provenance_explanation",
+            score_payload.get("novelty_provenance_explanation")
+            or (
+                (novelty_provenance or {}).get("provenance_explanation")
+                if isinstance(novelty_provenance, dict)
+                else None
+            ),
+        ),
+    }
+
+
+def _admet_overview(score_payload: dict, validation: dict | None = None) -> dict:
+    """Return stable ADMET evidence fields for API/chat payloads."""
+    validation_block = dict(validation or score_payload.get("validation") or {})
+    admet_provenance = validation_block.get(
+        "admet_provenance",
+        score_payload.get("admet_provenance"),
+    )
+    return {
+        "overall_safety_flag": validation_block.get(
+            "overall_safety_flag",
+            score_payload.get("overall_safety_flag"),
+        ),
+        "overall_safety_reason": validation_block.get(
+            "overall_safety_reason",
+            score_payload.get("overall_safety_reason")
+            or (
+                (admet_provenance or {}).get("overall_safety_reason")
+                if isinstance(admet_provenance, dict)
+                else None
+            ),
+        ),
+        "overall_safety_method": validation_block.get(
+            "overall_safety_method",
+            score_payload.get("overall_safety_method")
+            or (
+                (admet_provenance or {}).get("overall_safety_method")
+                if isinstance(admet_provenance, dict)
+                else None
+            ),
+        ),
+        "admet_evidence_level": validation_block.get(
+            "admet_evidence_level",
+            score_payload.get("admet_evidence_level")
+            or (
+                (admet_provenance or {}).get("evidence_level")
+                if isinstance(admet_provenance, dict)
+                else None
+            ),
+        ),
+        "admet_provenance": admet_provenance,
+        "admet_provenance_explanation": validation_block.get(
+            "admet_provenance_explanation",
+            score_payload.get("admet_provenance_explanation")
+            or (
+                (admet_provenance or {}).get("provenance_explanation")
+                if isinstance(admet_provenance, dict)
+                else None
+            ),
+        ),
+    }
+
+
+def _binding_overview(score_payload: dict, validation: dict | None = None) -> dict:
+    """Return stable binding evidence fields for API/chat payloads."""
+    validation_block = dict(validation or score_payload.get("validation") or {})
+    binding_provenance = validation_block.get(
+        "binding_provenance",
+        score_payload.get("binding_provenance"),
+    )
+    raw_binding_mode = (
+        validation_block.get("binding_path_mode_raw")
+        or score_payload.get("binding_path_mode_raw")
+        or (
+            (binding_provenance or {}).get("binding_path_mode_raw")
+            if isinstance(binding_provenance, dict)
+            else None
+        )
+        or validation_block.get("binding_mode")
+        or score_payload.get("binding_mode", score_payload.get("docking_mode"))
+        or (
+            (binding_provenance or {}).get("binding_mode")
+            if isinstance(binding_provenance, dict)
+            else None
+        )
+    )
+    public_binding_truth = _binding_truth_fields(raw_binding_mode)
+    return {
+        "binding_checked": validation_block.get(
+            "binding_checked",
+            score_payload.get("binding_checked")
+            or (
+                (binding_provenance or {}).get("binding_checked")
+                if isinstance(binding_provenance, dict)
+                else None
+            ),
+        ),
+        "binding_mode": validation_block.get(
+            "binding_mode",
+            score_payload.get("binding_mode", score_payload.get("docking_mode"))
+            or (
+                (binding_provenance or {}).get("binding_mode")
+                if isinstance(binding_provenance, dict)
+                else None
+            ),
+        ),
+        "binding_path_mode_raw": raw_binding_mode,
+        "binding_claim": validation_block.get(
+            "binding_claim",
+            score_payload.get("binding_claim")
+            or (
+                (binding_provenance or {}).get("binding_claim")
+                if isinstance(binding_provenance, dict)
+                else None
+            )
+            or public_binding_truth["binding_claim"],
+        ),
+        "binding_truth": validation_block.get(
+            "binding_truth",
+            score_payload.get("binding_truth")
+            or (
+                (binding_provenance or {}).get("binding_truth")
+                if isinstance(binding_provenance, dict)
+                else None
+            )
+            or public_binding_truth["binding_truth"],
+        ),
+        "binding_evidence_level": validation_block.get(
+            "binding_evidence_level",
+            score_payload.get("binding_evidence_level")
+            or (
+                (binding_provenance or {}).get("evidence_level")
+                if isinstance(binding_provenance, dict)
+                else None
+            ),
+        ),
+        "final_binding_reason": validation_block.get(
+            "final_binding_reason",
+            score_payload.get("final_binding_reason")
+            or (
+                (binding_provenance or {}).get("final_binding_reason")
+                if isinstance(binding_provenance, dict)
+                else None
+            ),
+        ),
+        "binding_state": validation_block.get(
+            "binding_state",
+            score_payload.get("binding_state")
+            or (
+                (binding_provenance or {}).get("binding_state")
+                if isinstance(binding_provenance, dict)
+                else None
+            ),
+        ),
+        "binding_provenance": binding_provenance,
+        "binding_provenance_explanation": validation_block.get(
+            "binding_provenance_explanation",
+            score_payload.get("binding_provenance_explanation")
+            or (
+                (binding_provenance or {}).get("provenance_explanation")
+                if isinstance(binding_provenance, dict)
+                else None
+            ),
+        ),
+    }
+
+
+def _decision_overview(score_payload: dict, validation: dict | None = None) -> dict:
+    """Return stable decision provenance fields for API/chat payloads."""
+    validation_block = dict(validation or score_payload.get("validation") or {})
+    decision_provenance = (
+        score_payload.get("decision_provenance")
+        or validation_block.get("decision_provenance")
+        or (score_payload.get("clinical") or {}).get("decision_provenance")
+    )
+    return {
+        "final_decision": (
+            score_payload.get("final_decision")
+            or validation_block.get("final_decision")
+            or (decision_provenance or {}).get("final_decision")
+        ),
+        "decision_score": (
+            score_payload.get("decision_score")
+            or validation_block.get("decision_score")
+            or (decision_provenance or {}).get("decision_score")
+        ),
+        "decision_confidence_tier": (
+            score_payload.get("decision_confidence_tier")
+            or validation_block.get("decision_confidence_tier")
+            or (decision_provenance or {}).get("confidence_tier")
+        ),
+        "decision_evidence_level": (
+            score_payload.get("decision_evidence_level")
+            or validation_block.get("evidence_level")
+            or (decision_provenance or {}).get("evidence_level")
+        ),
+        "final_decision_reason": (
+            score_payload.get("final_decision_reason")
+            or validation_block.get("final_decision_reason")
+            or (decision_provenance or {}).get("final_decision_reason")
+        ),
+        "decision_comparator": (
+            score_payload.get("reference_drug")
+            or (decision_provenance or {}).get("comparator_name")
+        ),
+        "decision_provenance": decision_provenance,
+        "decision_provenance_explanation": (
+            (decision_provenance or {}).get("provenance_explanation")
+        ),
+    }
+
+
+def _faculty_explanation(score_payload: dict, validation: dict | None = None) -> dict:
+    """Return the canonical faculty-facing explanation stack for API/chat payloads."""
+    validation_block = dict(validation or score_payload.get("validation") or {})
+    existing = validation_block.get("faculty_explanation") or score_payload.get("faculty_explanation")
+
+    binding = _binding_overview(score_payload, validation_block)
+    novelty = _novelty_overview(score_payload, validation_block)
+    admet = _admet_overview(score_payload, validation_block)
+    decision = _decision_overview(score_payload, validation_block)
+    return build_faculty_explanation_stack(
+        {
+            "reference_drug": validation_block.get(
+                "reference_drug",
+                score_payload.get("reference_drug", ACTIVE_REFERENCE_DRUG),
+            ),
+            **binding,
+            **novelty,
+            **admet,
+            **decision,
+            "binding_score": validation_block.get("binding_score", score_payload.get("binding_score")),
+            "reference_score": validation_block.get("reference_score", score_payload.get("reference_score")),
+            "delta_vs_reference": validation_block.get("delta_vs_reference", score_payload.get("delta_vs_reference")),
+            "real_docking_status": validation_block.get(
+                "real_docking_status",
+                score_payload.get("real_docking_status"),
+            ),
+            "real_docking_failure": validation_block.get(
+                "real_docking_failure",
+                score_payload.get("real_docking_failure"),
+            ),
+            "hepatotoxicity_risk": validation_block.get(
+                "hepatotoxicity_risk",
+                score_payload.get("hepatotoxicity_risk"),
+            ),
+            "herg_risk": validation_block.get(
+                "herg_risk",
+                validation_block.get("hERG_risk", score_payload.get("herg_risk", score_payload.get("hERG_risk"))),
+            ),
+            "cyp_interaction_risk": validation_block.get(
+                "cyp_interaction_risk",
+                score_payload.get("cyp_interaction_risk"),
+            ),
+            "faculty_explanation": existing,
+        }
+    )
+
+
+def _faculty_explanation_path(explanation: dict) -> str:
+    """Render the canonical explanation stack as a readable sentence chain."""
+    return (
+        f"Novelty: {explanation['novelty_summary']['summary']} "
+        f"ADMET: {explanation['admet_summary']['summary']} "
+        f"Binding: {explanation['binding_summary']['summary']} "
+        f"Decision: {explanation['decision_summary']['summary']}"
+    )
+
+
 def _build_summary(mode: str, intent: str, target_label: str, score_payload: dict) -> str:
     """Create a concise, mode-aware summary for the chat UI."""
-    score = score_payload.get("clinical_score", 0.0)
-    program_label = score_payload.get("program_label", target_label)
-    interpretation = _score_interpretation(score)
-    if mode == "simple":
-        return (
-            f"This {intent} result comes from the {program_label}. "
-            f"It scored {score:.4f}, which suggests {interpretation}."
-        )
-    if mode == "expert":
-        return (
-            f"Genorova reviewed this molecule inside the {program_label} with a model score of "
-            f"{score:.4f}. The output combines computed descriptors with a comparator-based validation screen, "
-            f"but it remains a hypothesis-generating result rather than experimental proof."
-        )
-    return (
-        f"Genorova selected this computational candidate for the {program_label} with a model score of {score:.4f}. "
-        f"That places it in a range indicating {interpretation}."
-    )
+    del mode, intent, target_label
+    return _faculty_explanation(score_payload).get("overall_summary", "Faculty explanation is not available.")
 
 
 def _build_generation_fallback_summary(target_label: str, generated: dict[str, Any]) -> str:
     """Explain the current safe generation fallback behavior in plain language."""
     trust = generated.get("trust", {})
     count_returned = generated.get("count_returned", 0)
+    generation_mode = generated.get("generation_mode")
     if generated.get("generation_status") == "inactive_science_path":
         return (
-            "The live Genorova science path is currently standardized to the diabetes / DPP4 / sitagliptin workflow, "
-            "so infection lead stories are not being surfaced in this active demo path."
+            f"The live Genorova science path is currently standardized to the {ACTIVE_PROGRAM_LABEL}, "
+            f"so '{target_label}' is not being surfaced in this active workspace path."
+        )
+    if generation_mode == GENERATION_MODE_REAL:
+        return (
+            "These molecules were freshly generated by the live autoregressive model and then revalidated under the active program."
         )
     if count_returned == 0:
         return (
-            "No candidate met the active DPP4 comparator screen in this run. "
+            "No candidate met the active program screen in this run. "
             "Genorova is returning an honest empty result rather than inventing a molecule."
         )
     source = trust.get("result_source", "safe_fallback")
     if source == "known_reference_fallback":
         return (
-            "Fresh generation confidence is low in the active DPP4 workflow, so Genorova is showing scored known reference molecules "
-            "as a safer fallback for comparison and explanation."
+            "Live generation did not return a trustworthy candidate set, so Genorova is explicitly in curated_library_mode and showing scored reference molecules."
         )
     return (
-        "Fresh generation confidence is currently limited, so Genorova is showing selectively revalidated stored molecules "
-        "instead of claiming a new trustworthy candidate run."
+        "Live generation did not return a trustworthy candidate set, so Genorova is explicitly in curated_library_mode and showing selectively revalidated stored molecules."
     )
 
 
 def _mode_specific_why(mode: str, score_payload: dict, target_label: str) -> str:
     """Explain why a molecule was selected in the requested detail mode."""
-    program_label = score_payload.get("program_label", target_label)
-    mw = score_payload.get("molecular_weight", 0.0)
-    logp = score_payload.get("logp", 0.0)
-    qed = score_payload.get("qed_score", 0.0)
-    sa = score_payload.get("sa_score", 0.0)
-    lip = "passes" if score_payload.get("passes_lipinski") else "does not fully pass"
-    decision = score_payload.get("final_decision", "reject")
-    delta = score_payload.get("delta_vs_reference")
-    comparator = score_payload.get("reference_drug", ACTIVE_REFERENCE_DRUG)
-    if mode == "simple":
-        return (
-            f"It was chosen for the {program_label} because the size is manageable, the lipophilicity is not extreme, "
-            f"and the active validation path currently rates it as {decision.replace('_', ' ')}."
-        )
-    if mode == "expert":
-        return (
-            f"Selection was driven by a balanced property profile: MW {mw}, LogP {logp}, QED {qed}, SA {sa}, and "
-            f"Lipinski compliance status that currently {lip}. In the active DPP4 workflow the comparator is {comparator}; "
-            f"delta versus comparator = {delta}. This supports disciplined follow-up rather than any claim of validated efficacy."
-        )
-    return (
-        f"It was selected because the model saw a favorable balance of molecular size (MW {mw}), lipophilicity "
-        f"(LogP {logp}), drug-likeness (QED {qed}), and synthetic accessibility (SA {sa}). It currently {lip} "
-        f"the Lipinski screen in the {program_label}."
-    )
+    del mode, target_label
+    return _faculty_explanation_path(_faculty_explanation(score_payload))
 
 
 def _candidate_block(score_payload: dict, label: str | None = None) -> dict:
     """Stable candidate block used by the chat payload."""
+    binding = _binding_overview(score_payload)
+    novelty = _novelty_overview(score_payload)
+    admet = _admet_overview(score_payload)
+    decision = _decision_overview(score_payload)
+    faculty_explanation = _faculty_explanation(score_payload)
     return {
         "name": label,
         "smiles": score_payload.get("smiles"),
@@ -1482,10 +2176,19 @@ def _candidate_block(score_payload: dict, label: str | None = None) -> dict:
         "evidence_level": score_payload.get("evidence_level"),
         "confidence_level": score_payload.get("confidence_level"),
         "docking_mode": score_payload.get("docking_mode"),
+        "binding_claim": binding.get("binding_claim"),
+        "binding_truth": binding.get("binding_truth"),
         "binding_mode_reason": score_payload.get("binding_mode_reason"),
         "real_docking_status": score_payload.get("real_docking_status"),
         "real_docking_failure": score_payload.get("real_docking_failure"),
-        "novelty_status": score_payload.get("novelty_status"),
+        **binding,
+        **novelty,
+        **admet,
+        **decision,
+        "faculty_explanation": faculty_explanation,
+        "hepatotoxicity_risk": score_payload.get("hepatotoxicity_risk"),
+        "hERG_risk": score_payload.get("herg_risk"),
+        "cyp_interaction_risk": score_payload.get("cyp_interaction_risk"),
         "confidence_note": score_payload.get("confidence_note"),
         "result_source": score_payload.get("result_source"),
         "fallback_used": score_payload.get("fallback_used", False),
@@ -1523,6 +2226,11 @@ def _physical_properties(score_payload: dict) -> dict:
 def _validation_block(score_payload: dict) -> dict:
     """Return a flat validation ledger for chat rendering."""
     validation = dict(score_payload.get("validation") or {})
+    binding = _binding_overview(score_payload, validation)
+    novelty = _novelty_overview(score_payload, validation)
+    admet = _admet_overview(score_payload, validation)
+    decision = _decision_overview(score_payload, validation)
+    faculty_explanation = _faculty_explanation(score_payload, validation)
     return {
         "active_program": score_payload.get("program_label", ACTIVE_PROGRAM_LABEL),
         "canonical_target": score_payload.get("target", ACTIVE_TARGET),
@@ -1531,9 +2239,15 @@ def _validation_block(score_payload: dict) -> dict:
         "decision_score": validation.get("decision_score", score_payload.get("decision_score")),
         "confidence_level": validation.get("confidence_level", score_payload.get("confidence_level")),
         "evidence_level": validation.get("evidence_level", score_payload.get("evidence_level")),
-        "novelty_status": validation.get("novelty_status", score_payload.get("novelty_status")),
+        **binding,
+        **novelty,
+        **admet,
+        **decision,
+        "faculty_explanation": faculty_explanation,
         "pains_result": "alert_detected" if validation.get("is_pains", score_payload.get("is_pains")) else "none_detected",
         "docking_mode": validation.get("docking_mode", score_payload.get("docking_mode")),
+        "binding_claim": binding.get("binding_claim"),
+        "binding_truth": binding.get("binding_truth"),
         "binding_mode_reason": validation.get("binding_mode_reason", score_payload.get("binding_mode_reason")),
         "binding_score": validation.get("binding_score", score_payload.get("binding_score")),
         "reference_score": validation.get("reference_score", score_payload.get("reference_score")),
@@ -1550,11 +2264,16 @@ def _validation_block(score_payload: dict) -> dict:
 def _pharmacology_block(score_payload: dict, target_label: str) -> dict:
     """Return a readable pharmacology section without overstating certainty."""
     program_label = score_payload.get("program_label", target_label)
+    binding = _binding_overview(score_payload)
+    novelty = _novelty_overview(score_payload)
+    admet = _admet_overview(score_payload)
     return {
         "intended_program": program_label,
         "canonical_target": score_payload.get("target", ACTIVE_TARGET),
         "reference_drug": score_payload.get("reference_drug", ACTIVE_REFERENCE_DRUG),
         "docking_mode": score_payload.get("docking_mode"),
+        "binding_claim": binding.get("binding_claim"),
+        "binding_truth": binding.get("binding_truth"),
         "binding_mode_reason": score_payload.get("binding_mode_reason"),
         "real_docking_status": score_payload.get("real_docking_status"),
         "real_docking_failure": score_payload.get("real_docking_failure"),
@@ -1563,6 +2282,9 @@ def _pharmacology_block(score_payload: dict, target_label: str) -> dict:
         "evidence_level": score_payload.get("evidence_level"),
         "model_score_meaning": _score_interpretation(score_payload.get("clinical_score", 0.0)),
         "oral_drug_likeness": "supported by current property profile" if score_payload.get("passes_lipinski") else "partially supported",
+        **binding,
+        **novelty,
+        **admet,
         "hepatotoxicity_risk": score_payload.get("hepatotoxicity_risk"),
         "hERG_risk": score_payload.get("herg_risk"),
         "cyp_interaction_risk": score_payload.get("cyp_interaction_risk"),
@@ -1587,15 +2309,29 @@ def _strengths_block(score_payload: dict) -> list[str]:
 def _risks_block(score_payload: dict) -> list[str]:
     """Summarize likely development risks."""
     risks = []
-    toxicity_risk = _estimate_toxicity_risk(score_payload)
+    binding = _binding_overview(score_payload)
+    admet = _admet_overview(score_payload)
     if score_payload.get("lipinski_violations", 0) > 0:
         risks.append("Lipinski violations suggest oral developability risk.")
     if score_payload.get("logp", 0) > 3:
         risks.append("Elevated LogP may increase off-target binding and formulation complexity.")
     if score_payload.get("qed_score", 1) < 0.45:
         risks.append("Lower QED suggests weaker overall drug-like balance.")
-    if toxicity_risk in {"moderate", "high"}:
-        risks.append(f"Rule-based toxicity screen suggests {toxicity_risk} risk that needs experimental follow-up.")
+    raw_binding_mode = score_payload.get("binding_path_mode_raw") or score_payload.get("binding_mode")
+    if raw_binding_mode == "fallback_proxy":
+        risks.append("Binding is being reported as predicted binding (Vina-validated offline) because live docking was blocked or failed.")
+    elif raw_binding_mode == "scaffold_proxy":
+        risks.append("Binding is being reported as predicted binding (Vina-validated offline) from a scaffold proxy rather than a live docking run.")
+    elif binding.get("binding_checked") is False:
+        risks.append("Binding was not checked because the active binding path could not evaluate the input structure.")
+    if admet.get("overall_safety_reason"):
+        risks.append(admet["overall_safety_reason"])
+    elif _estimate_toxicity_risk(score_payload) in {"moderate", "high"}:
+        risks.append("Rule-based toxicity screen suggests elevated risk that needs experimental follow-up.")
+    if admet.get("admet_evidence_level") == "incomplete_heuristic_proxy":
+        risks.append("ADMET evidence is incomplete because one or more safety checks were not completed.")
+    elif admet.get("admet_evidence_level") == "heuristic_proxy_regex_fallback":
+        risks.append("ADMET evidence relied on regex fallback alerts because RDKit descriptors were unavailable.")
     return risks or ["No major rule-based red flags were detected, but real safety remains unknown."]
 
 
@@ -1637,7 +2373,7 @@ def _generated_candidates_with_visuals(molecules: list[dict[str, Any]]) -> list[
     """Attach structure SVGs to generated candidate list entries."""
     enriched = []
     for molecule in molecules:
-        next_molecule = dict(molecule)
+        next_molecule = _public_candidate_payload(molecule)
         next_molecule["molecule_svg"] = _molecule_svg(molecule.get("smiles"))
         enriched.append(next_molecule)
     return enriched
@@ -1679,11 +2415,11 @@ def _compare_molecules(first: dict, second: dict) -> dict:
     """
     Create a UI-friendly comparison block for two scored molecules.
 
-    Uses rank_score (evidence-weighted) as the ordering signal, not raw clinical_score.
-    Falls back to clinical_score if rank_score is not present for backward compat.
+    Uses clinical_score as the public ordering signal and falls back to rank_score
+    only when an older internal payload has not yet been normalized.
     """
     def _rank(c: dict) -> float:
-        return float(c.get("rank_score") or c.get("clinical_score") or 0.0)
+        return float(c.get("clinical_score") or c.get("rank_score") or 0.0)
 
     gap = round(_rank(first) - _rank(second), 4)
     preferred = first if gap >= 0 else second
@@ -1691,48 +2427,90 @@ def _compare_molecules(first: dict, second: dict) -> dict:
 
     pref_label = _ranking_label(candidate=preferred)
     other_label = _ranking_label(candidate=other)
+    preferred_binding = _binding_overview(preferred)
+    preferred_novelty = _novelty_overview(preferred)
+    preferred_admet = _admet_overview(preferred)
+
+    molecules = [
+        {
+            "label": "Molecule A",
+            "smiles": first.get("smiles"),
+            "summary": first.get("summary"),
+            "clinical_score": first.get("clinical_score") or first.get("rank_score"),
+            "rank_label": _ranking_label(candidate=first),
+            "qed_score": first.get("qed_score"),
+            "logp": first.get("logp"),
+            "molecular_weight": first.get("molecular_weight"),
+            "recommendation": first.get("recommendation"),
+            "delta_vs_reference": first.get("delta_vs_reference"),
+            "hepatotoxicity_risk": first.get("hepatotoxicity_risk"),
+            "herg_risk": first.get("herg_risk"),
+            "cyp_interaction_risk": first.get("cyp_interaction_risk"),
+            "binding_claim": first.get("binding_claim"),
+            "binding_truth": first.get("binding_truth"),
+            **_binding_overview(first),
+            **_novelty_overview(first),
+            **_admet_overview(first),
+            **_decision_overview(first),
+            "faculty_explanation": _faculty_explanation(first),
+            "molecule_svg": _molecule_svg(first.get("smiles")),
+        },
+        {
+            "label": "Molecule B",
+            "smiles": second.get("smiles"),
+            "summary": second.get("summary"),
+            "clinical_score": second.get("clinical_score") or second.get("rank_score"),
+            "rank_label": _ranking_label(candidate=second),
+            "qed_score": second.get("qed_score"),
+            "logp": second.get("logp"),
+            "molecular_weight": second.get("molecular_weight"),
+            "recommendation": second.get("recommendation"),
+            "delta_vs_reference": second.get("delta_vs_reference"),
+            "hepatotoxicity_risk": second.get("hepatotoxicity_risk"),
+            "herg_risk": second.get("herg_risk"),
+            "cyp_interaction_risk": second.get("cyp_interaction_risk"),
+            "binding_claim": second.get("binding_claim"),
+            "binding_truth": second.get("binding_truth"),
+            **_binding_overview(second),
+            **_novelty_overview(second),
+            **_admet_overview(second),
+            **_decision_overview(second),
+            "faculty_explanation": _faculty_explanation(second),
+            "molecule_svg": _molecule_svg(second.get("smiles")),
+        },
+    ]
+    comparison_presentation = build_comparison_presentation(
+        molecules[0],
+        molecules[1],
+        left_label="Molecule A",
+        right_label="Molecule B",
+    )
+
+    # All summary sentences and the score note now come from the shared presentation payload.
+    sec = comparison_presentation["section_summaries"]
 
     return {
-        "molecules": [
-            {
-                "label": "Molecule A",
-                "smiles": first.get("smiles"),
-                "rank_score": first.get("rank_score") or first.get("clinical_score"),
-                "rank_label": _ranking_label(candidate=first),
-                "qed_score": first.get("qed_score"),
-                "logp": first.get("logp"),
-                "molecular_weight": first.get("molecular_weight"),
-                "recommendation": first.get("recommendation"),
-                "final_decision": first.get("final_decision"),
-                "delta_vs_reference": first.get("delta_vs_reference"),
-                "molecule_svg": _molecule_svg(first.get("smiles")),
-            },
-            {
-                "label": "Molecule B",
-                "smiles": second.get("smiles"),
-                "rank_score": second.get("rank_score") or second.get("clinical_score"),
-                "rank_label": _ranking_label(candidate=second),
-                "qed_score": second.get("qed_score"),
-                "logp": second.get("logp"),
-                "molecular_weight": second.get("molecular_weight"),
-                "recommendation": second.get("recommendation"),
-                "final_decision": second.get("final_decision"),
-                "delta_vs_reference": second.get("delta_vs_reference"),
-                "molecule_svg": _molecule_svg(second.get("smiles")),
-            },
-        ],
+        "molecules": molecules,
+        "comparison_presentation": comparison_presentation,
         "preferred_smiles": preferred.get("smiles"),
         "preferred_label": pref_label,
-        "why": (
-            f"Molecule ranked '{pref_label}' (evidence-weighted score "
-            f"{_rank(preferred):.4f}) is preferred over the molecule ranked "
-            f"'{other_label}' (score {_rank(other):.4f}) in the active DPP4 workflow. "
-            f"Final decisions: {preferred.get('final_decision')} vs "
-            f"{other.get('final_decision')}. "
-            "Score gap reflects evidence quality (proxy binding, novelty uncertainty) "
-            "not just raw clinical properties."
-        ),
+        "preferred_binding_mode": preferred_binding.get("binding_mode"),
+        "preferred_final_binding_reason": preferred_binding.get("final_binding_reason"),
+        "preferred_binding_provenance": preferred_binding.get("binding_provenance"),
+        "preferred_novelty_status": preferred_novelty.get("novelty_status"),
+        "preferred_novelty_reason": preferred_novelty.get("novelty_reason"),
+        "preferred_novelty_provenance": preferred_novelty.get("novelty_provenance"),
+        "preferred_overall_safety_flag": preferred_admet.get("overall_safety_flag"),
+        "preferred_overall_safety_reason": preferred_admet.get("overall_safety_reason"),
+        "preferred_admet_provenance": preferred_admet.get("admet_provenance"),
+        "novelty_summary": sec["novelty"],
+        "binding_summary": sec["binding"],
+        "admet_summary": sec["admet"],
+        "safety_summary": sec["admet"],
+        "decision_summary": sec["decision"],
+        "why": comparison_presentation["full_comparison_note"],
         "score_gap": abs(gap),
+        "comparison_score_note": comparison_presentation["score_note"],
     }
 
 
@@ -1925,6 +2703,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
                 "supported_bucket": target_bucket,
                 "count_returned": 0,
                 "generation_status": generated.get("generation_status"),
+                "generation_mode": generated.get("generation_mode"),
             },
             "conversation_state": _build_conversation_state(
                 intent="generate",
@@ -1952,7 +2731,14 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         "mode": mode,
         "message": message,
         "summary": _build_generation_fallback_summary(target_label, generated),
-        "candidate": _candidate_block(score_payload, label="Top safe fallback molecule"),
+        "candidate": _candidate_block(
+            score_payload,
+            label=(
+                "Top freshly generated candidate"
+                if generated.get("generation_mode") == GENERATION_MODE_REAL
+                else "Top curated-library candidate"
+            ),
+        ),
         "generated_candidates": _generated_candidates_with_visuals(generated["molecules"]),
         "why": _mode_specific_why(mode, score_payload, target_label),
         "chemical_properties": _chemical_properties(score_payload),
@@ -1971,6 +2757,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             "supported_bucket": target_bucket,
             "count_returned": generated["count_returned"],
             "generation_status": generated.get("generation_status"),
+            "generation_mode": generated.get("generation_mode"),
             "source_type": generated.get("trust", {}).get("result_source"),
         },
         "conversation_state": _build_conversation_state(
@@ -2001,11 +2788,14 @@ def _api_home_payload() -> dict:
     """Stable metadata payload for the API surface."""
     return {
         "name":    "Genorova AI Computational Molecule Analysis API",
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "docs":    "/docs",
         "health":  "/health",
+        "ready":   "/ready",
+        "release": "/version",
         "ops_status": "/ops/status",
         "report":  "/report",
+        "public_url": _public_url(),
         "prototype_status": PROTOTYPE_STATUS,
     }
 
@@ -2041,12 +2831,12 @@ class ValidateRequest(BaseModel):
         default=ACTIVE_TARGET,
         description=(
             "Protein target key. The active Genorova validation path defaults to "
-            "DPP4. Other targets remain available for explicit validation calls."
+            f"{ACTIVE_TARGET}. Other targets remain available for explicit validation calls."
         ),
     )
     disease: str = Field(
         default=ACTIVE_DISEASE,
-        description="Disease context for clinical evaluation. The active path defaults to diabetes.",
+        description=f"Disease context for clinical evaluation. The active path defaults to {ACTIVE_DISEASE}.",
     )
     reference_drug: str = Field(
         default=ACTIVE_REFERENCE_DRUG,
@@ -2234,6 +3024,8 @@ def api_validate_binding(request: BindingRequest):
     - mode: real_docking | scaffold_proxy | fallback_proxy | unavailable
     - confidence: high | medium | low | none
     - mode_reason, real_docking_status, real_docking_failure
+    - binding_provenance: canonical record of which binding path ran and what blocked real docking if any
+    - binding_provenance_explanation: plain-language summary of the binding path and evidence strength
     - interpretation: plain-language binding summary
     """
     try:

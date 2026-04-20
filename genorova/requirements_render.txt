@@ -1,0 +1,19 @@
+# Render deployment requirements — API server only
+# Excludes torch/torchvision/torchaudio (training-only, not needed at serve time).
+# Pinned to match root requirements.txt.
+
+fastapi==0.135.3
+uvicorn==0.44.0
+pydantic==2.13.0
+
+rdkit==2026.3.1
+
+pandas==3.0.2
+numpy==2.4.4
+scikit-learn==1.8.0
+
+pillow==12.2.0
+
+requests==2.33.1
+python-dateutil==2.9.0.post0
+tqdm==4.66.5

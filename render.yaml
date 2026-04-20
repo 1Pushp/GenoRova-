@@ -2,10 +2,10 @@ services:
   - type: web
     name: genorova
     runtime: python
-    rootDir: genorova
+    rootDir: .
     healthCheckPath: /health
-    buildCommand: cd ../app/frontend && npm ci && npm run build && cd ../../genorova && pip install -r requirements.txt
-    startCommand: uvicorn src.api:app --host 0.0.0.0 --port $PORT
+    buildCommand: cd app/frontend && npm ci && npm run build && cd ../.. && pip install -r genorova/requirements_render.txt && pip install -r app/backend/requirements.txt
+    startCommand: uvicorn app.backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
@@ -13,5 +13,17 @@ services:
         value: 20.18.0
       - key: GENOROVA_LOG_LEVEL
         value: INFO
+      - key: GENOROVA_VERSION
+        value: 1.0.0
+      - key: GENOROVA_PUBLIC_URL
+        value: https://genorova.onrender.com
+      - key: GENOROVA_ALLOWED_ORIGINS
+        value: https://genorova.onrender.com,http://localhost:5173,http://127.0.0.1:5173
+      - key: GENOROVA_COOKIE_SECURE
+        value: "true"
+      - key: GENOROVA_AUTH_DB_PATH
+        value: /opt/render/project/src/runtime/genorova_auth.db
+      - key: CHAT_MEMORY_DB_PATH
+        value: /opt/render/project/src/runtime/chat_memory.db
       - key: VITE_API_BASE_URL
         value: ""

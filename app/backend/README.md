@@ -1,14 +1,15 @@
-# Genorova Backend MVP
+# Genorova Backend
 
-This backend wraps the existing `genorova/src/api.py` logic and adds:
+This is the canonical deployment entrypoint for Genorova.
+
+It reuses the core implementation from `genorova/src/api.py` and adds:
 
 - `POST /chat`
 - SQLite-backed lightweight conversation memory
 - CORS for the frontend
 
-Run locally:
+Run locally from the repository root:
 
 ```bash
-cd app/backend
-python -m uvicorn main:app --reload --port 8000
+python -m uvicorn app.backend.main:app --reload --port 8000
 ```
