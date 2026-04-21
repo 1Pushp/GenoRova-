@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 const BACKEND_ORIGIN = API_BASE_URL || "http://localhost:8000";
 const API_PREFIX = API_BASE_URL ? `${API_BASE_URL}/api` : "/api";
+const BUILD_SHA = (import.meta.env.VITE_BUILD_SHA || "").slice(0, 7) || "dev";
 
 const defaultStats = {
   total_molecules: 0,
@@ -574,7 +575,10 @@ export default function PlatformApp() {
 
       <footer className="border-t border-white/10 bg-[#0A0F1E]">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-8 text-sm text-slate-300 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div>Built by Pushp Dwivedi. Prototype research-support outputs only.</div>
+          <div>
+            Built by Pushp Dwivedi. Prototype research-support outputs only.{" "}
+            <span className="font-mono text-slate-500">build:{BUILD_SHA}</span>
+          </div>
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-6">
             <a href="mailto:pushpdwivedi911@gmail.com" className="transition hover:text-white">
               pushpdwivedi911@gmail.com

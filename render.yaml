@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: .
     healthCheckPath: /health
-    buildCommand: cd app/frontend && npm ci && npm run build && cd ../.. && pip install -r genorova/requirements_render.txt && pip install -r app/backend/requirements.txt
+    buildCommand: cd app/frontend && npm ci && VITE_BUILD_SHA=$RENDER_GIT_COMMIT npm run build && cd ../.. && pip install -r genorova/requirements_render.txt && pip install -r app/backend/requirements.txt
     startCommand: uvicorn app.backend.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
