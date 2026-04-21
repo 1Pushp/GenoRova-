@@ -31,6 +31,7 @@ IMPORTANT — READ BEFORE INTERPRETING RESULTS:
   from experimentally validated predictions.
 
 PUBLIC API:
+  build_admet_evidence(admet_result) -> dict
   run_admet_evaluation(smiles) -> dict  (fields match ADMETResult)
 
 REFERENCES FOR STRUCTURAL ALERTS:
@@ -210,6 +211,17 @@ def _risk_level_from_score(score: float) -> str:
     return "high"
 
 
+def _not_checked_result(reason: str) -> dict:
+    """Return a consistent record when an ADMET check could not be completed."""
+    return {
+        "level": "unknown",
+        "score": None,
+        "alerts": [reason],
+        "method": "not_run_invalid_smiles",
+        "checked": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 1.  Hepatotoxicity / DILI
 # ---------------------------------------------------------------------------
@@ -238,8 +250,7 @@ def predict_hepatotoxicity(smiles: str) -> dict:
     if rdkit_ok:
         mol = _Chem.MolFromSmiles(smiles)
         if mol is None:
-            return {"level": "unknown", "score": None, "alerts": ["Invalid SMILES"],
-                    "method": "structural_alerts_heuristic"}
+            return _not_checked_result("Invalid SMILES")
 
         # Check SMARTS alerts
         alerts.extend(_check_smarts_alerts(mol, _DILI_ALERTS_SMARTS, "DILI"))
@@ -286,6 +297,7 @@ def predict_hepatotoxicity(smiles: str) -> dict:
         "score":   score,
         "alerts":  alerts,
         "method":  method,
+        "checked": True,
     }
 
 
@@ -319,8 +331,7 @@ def predict_herg_inhibition(smiles: str) -> dict:
     if rdkit_ok:
         mol = _Chem.MolFromSmiles(smiles)
         if mol is None:
-            return {"level": "unknown", "score": None, "alerts": ["Invalid SMILES"],
-                    "method": "structural_alerts_heuristic"}
+            return _not_checked_result("Invalid SMILES")
 
         try:
             logp = _Crippen.MolLogP(mol)
@@ -384,6 +395,7 @@ def predict_herg_inhibition(smiles: str) -> dict:
         "score":  score,
         "alerts": alerts,
         "method": method,
+        "checked": True,
     }
 
 
@@ -416,8 +428,7 @@ def predict_cyp_interaction(smiles: str) -> dict:
     if rdkit_ok:
         mol = _Chem.MolFromSmiles(smiles)
         if mol is None:
-            return {"level": "unknown", "score": None, "alerts": ["Invalid SMILES"],
-                    "method": "structural_alerts_heuristic"}
+            return _not_checked_result("Invalid SMILES")
 
         # SMARTS-based CYP alerts
         cyp_hits = _check_smarts_alerts(mol, _CYP_ALERTS_SMARTS, "CYP")
@@ -480,6 +491,7 @@ def predict_cyp_interaction(smiles: str) -> dict:
         "score":  score,
         "alerts": alerts,
         "method": method,
+        "checked": True,
     }
 
 
@@ -523,6 +535,204 @@ def _compute_overall_flag(
         flag = "likely_safe"
 
     return flag, safety_score
+
+
+def _checked_methods(*risks: dict) -> List[str]:
+    """Return the methods for ADMET checks that actually ran."""
+    return [
+        str(risk.get("method", "")).strip()
+        for risk in risks
+        if risk.get("checked", False)
+    ]
+
+
+def _admet_evidence_level(*risks: dict) -> str:
+    """Summarize how strong the current ADMET evidence is."""
+    methods = _checked_methods(*risks)
+    if not methods or not all(risk.get("checked", False) for risk in risks):
+        return "incomplete_heuristic_proxy"
+    if any("regex" in method for method in methods):
+        return "heuristic_proxy_regex_fallback"
+    if any("rdkit" in method for method in methods):
+        return "heuristic_proxy_with_rdkit_descriptors"
+    return "heuristic_proxy_structural_alerts"
+
+
+def _overall_safety_method(*risks: dict) -> str:
+    """Name the canonical method used for the final safety label."""
+    methods = _checked_methods(*risks)
+    if not methods or not all(risk.get("checked", False) for risk in risks):
+        return "incomplete_heuristic_alert_consensus"
+    if any("regex" in method for method in methods):
+        return "heuristic_alert_consensus_with_regex_fallback"
+    if any("rdkit" in method for method in methods):
+        return "heuristic_alert_consensus_with_rdkit_descriptors"
+    return "heuristic_alert_consensus"
+
+
+def _method_for_people(method: str, *, checked: bool) -> str:
+    """Turn an internal ADMET method string into simple reviewer-facing language."""
+    if not checked or method == "not_run_invalid_smiles":
+        return "not run because the SMILES could not be parsed"
+    if "regex" in method:
+        return "regex fallback structural-alert screen"
+    if "rdkit" in method:
+        return "structural alerts plus RDKit descriptor proxy"
+    if "pharmacophore" in method:
+        return "structural pharmacophore heuristic"
+    if "structural_alerts" in method:
+        return "structural-alert heuristic"
+    return method.replace("_", " ")
+
+
+def _alert_excerpt(alerts: List[str]) -> str:
+    """Return a short human-readable excerpt of matched alerts."""
+    clean_alerts = [alert for alert in alerts if alert and alert != "Invalid SMILES"]
+    if not clean_alerts:
+        return ""
+
+    excerpt = "; ".join(clean_alerts[:2])
+    if len(clean_alerts) > 2:
+        excerpt += f"; +{len(clean_alerts) - 2} more"
+    return excerpt
+
+
+def _flagged_checks(*checks: Tuple[str, dict], levels: tuple[str, ...]) -> List[str]:
+    """Return reviewer-friendly summaries for checks at the requested risk levels."""
+    flagged = []
+    for label, risk in checks:
+        if risk.get("level") not in levels:
+            continue
+        excerpt = _alert_excerpt(list(risk.get("alerts") or []))
+        if excerpt:
+            flagged.append(f"{label} ({risk.get('level')}: {excerpt})")
+        else:
+            flagged.append(f"{label} ({risk.get('level')})")
+    return flagged
+
+
+def _overall_safety_reason(
+    overall_flag: str,
+    hepatotoxicity: dict,
+    herg: dict,
+    cyp: dict,
+) -> str:
+    """Create one canonical plain-language reason for the final safety label."""
+    checks = (
+        ("hepatotoxicity", hepatotoxicity),
+        ("hERG", herg),
+        ("CYP interaction", cyp),
+    )
+    missing = [label for label, risk in checks if not risk.get("checked", False)]
+    if overall_flag == "unknown" or missing:
+        if len(missing) == 3:
+            return (
+                "Safety interpretation remains unknown because the ADMET checks could not be completed."
+            )
+        if missing:
+            ran = [label for label, risk in checks if risk.get("checked", False)]
+            ran_text = ", ".join(ran) if ran else "none of the checks"
+            return (
+                f"Safety interpretation remains uncertain because {', '.join(missing)} "
+                f"was not checked; available heuristic evidence only covers {ran_text}."
+            )
+        return "Safety interpretation remains uncertain because the available ADMET screen was incomplete."
+
+    high_risk = _flagged_checks(*checks, levels=("high",))
+    if overall_flag == "likely_unsafe" and high_risk:
+        return (
+            "Likely unsafe: at least one ADMET screen raised a high-risk alert, specifically "
+            f"{'; '.join(high_risk)}."
+        )
+
+    caution_risk = _flagged_checks(*checks, levels=("medium", "high"))
+    if overall_flag == "caution" and caution_risk:
+        return (
+            "Caution: the heuristic ADMET screen raised a non-low alert, specifically "
+            f"{'; '.join(caution_risk)}."
+        )
+
+    return (
+        "Likely safe within this heuristic screen: hepatotoxicity, hERG, and CYP checks ran "
+        "without medium- or high-risk alerts."
+    )
+
+
+def _check_explanation(label: str, risk: dict) -> str:
+    """Explain whether an individual ADMET check ran and what it found."""
+    checked = bool(risk.get("checked", False))
+    method = _method_for_people(str(risk.get("method", "")), checked=checked)
+    alerts = list(risk.get("alerts") or [])
+    score = risk.get("score")
+    score_text = f" (score {score:.2f})" if isinstance(score, (int, float)) else ""
+
+    if not checked:
+        return f"{label} was not checked because the SMILES could not be parsed."
+
+    clean_alerts = [alert for alert in alerts if alert != "Invalid SMILES"]
+    excerpt = _alert_excerpt(clean_alerts)
+    if excerpt:
+        return (
+            f"{label} was checked via {method} and flagged {len(clean_alerts)} "
+            f"alert(s){score_text}: {excerpt}."
+        )
+    return f"{label} was checked via {method} and no alerts were triggered{score_text}."
+
+
+def build_admet_provenance(admet_result: dict) -> dict:
+    """
+    Build one canonical ADMET provenance block from the active ADMET result.
+
+    This function is the only place that converts the per-check ADMET outputs
+    into reviewer-facing provenance metadata and explanation text.
+    """
+    hepatotoxicity = dict(admet_result.get("hepatotoxicity_risk") or {})
+    herg = dict(admet_result.get("herg_risk") or {})
+    cyp = dict(admet_result.get("cyp_risk") or {})
+
+    overall_flag = str(admet_result.get("overall_safety_flag", "unknown"))
+    overall_reason = _overall_safety_reason(overall_flag, hepatotoxicity, herg, cyp)
+    overall_method = _overall_safety_method(hepatotoxicity, herg, cyp)
+    evidence_level = _admet_evidence_level(hepatotoxicity, herg, cyp)
+
+    provenance = {
+        "hepatotoxicity_checked": bool(hepatotoxicity.get("checked", False)),
+        "hepatotoxicity_method": str(hepatotoxicity.get("method", "")),
+        "hepatotoxicity_alerts": list(hepatotoxicity.get("alerts") or []),
+        "hepatotoxicity_score": hepatotoxicity.get("score"),
+        "herg_checked": bool(herg.get("checked", False)),
+        "herg_method": str(herg.get("method", "")),
+        "herg_alerts": list(herg.get("alerts") or []),
+        "herg_score": herg.get("score"),
+        "cyp_checked": bool(cyp.get("checked", False)),
+        "cyp_method": str(cyp.get("method", "")),
+        "cyp_alerts": list(cyp.get("alerts") or []),
+        "overall_safety_method": overall_method,
+        "overall_safety_flag": overall_flag,
+        "overall_safety_reason": overall_reason,
+        "evidence_level": evidence_level,
+    }
+    provenance["provenance_explanation"] = (
+        f"{_check_explanation('Hepatotoxicity', hepatotoxicity)} "
+        f"{_check_explanation('hERG', herg)} "
+        f"{_check_explanation('CYP interaction', cyp)} "
+        f"Evidence level: {evidence_level.replace('_', ' ')}, so this remains a heuristic/proxy screen rather than experimental safety data. "
+        f"Final safety label: {overall_flag.replace('_', ' ')} because {overall_reason}"
+    )
+    return provenance
+
+
+def build_admet_evidence(admet_result: dict) -> dict:
+    """Expose stable ADMET evidence fields for pipeline, API, and report layers."""
+    provenance = build_admet_provenance(admet_result)
+    return {
+        "overall_safety_flag": provenance["overall_safety_flag"],
+        "overall_safety_reason": provenance["overall_safety_reason"],
+        "overall_safety_method": provenance["overall_safety_method"],
+        "admet_evidence_level": provenance["evidence_level"],
+        "admet_provenance": provenance,
+        "admet_provenance_explanation": provenance["provenance_explanation"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +784,7 @@ def run_admet_evaluation(smiles: str) -> dict:
         "safety decision.  Confirm with: pkCSM, SwissADME, or in-vitro assays."
     )
 
-    return {
+    result = {
         "smiles":               smiles,
         "hepatotoxicity_risk":  dili,
         "herg_risk":            herg,
@@ -584,6 +794,10 @@ def run_admet_evaluation(smiles: str) -> dict:
         "disclaimer":           disclaimer,
         "rdkit_available":      rdkit_ok,
         "notes":                notes,
+    }
+    return {
+        **result,
+        **build_admet_evidence(result),
     }
 
 

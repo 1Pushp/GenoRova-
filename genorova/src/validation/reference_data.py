@@ -35,14 +35,14 @@ from typing import Dict
 # Canonical narrative path
 # ---------------------------------------------------------------------------
 # All default reports, API defaults, and generation evaluation should use
-# DPP4 / sitagliptin / diabetes unless explicitly overridden.
+# bacterial carbonic anhydrase (bCA) / acetazolamide / infection unless explicitly overridden.
 #
-# Rationale: sitagliptin's binding mode to DPP4 is crystal-structure validated
-# (PDB 1NNY), making it the most scientifically defensible proxy anchor.
-# Insulin receptor (1IR3) is a legitimate secondary target and remains supported.
+# Rationale: acetazolamide's binding to bacterial CA is crystal-structure validated
+# (PDB 3CYU) with published Ki=6.4 nM, making it the most scientifically defensible anchor.
+# DPP4 / sitagliptin remains in KNOWN_TARGETS for legacy reference but is no longer active.
 
-CANONICAL_TARGET  = "dpp4"
-CANONICAL_DISEASE = "diabetes"
+CANONICAL_TARGET  = "bca"
+CANONICAL_DISEASE = "infection"
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +50,19 @@ CANONICAL_DISEASE = "diabetes"
 # ---------------------------------------------------------------------------
 
 KNOWN_TARGETS: Dict[str, Dict] = {
+    "bca": {
+        "pdb_id":                 "3CYU",
+        "description":            "Bacterial carbonic anhydrase (H. pylori HpCA) — antibacterial target",
+        "disease":                "infection",
+        "reference_drug":         "acetazolamide",
+        "reference_smiles":       "CC(=O)Nc1nnc(s1)S(N)(=O)=O",
+        "known_binding_kcal_mol": -11.2,    # from published Ki = 6.4 nM (ΔG ≈ RT·ln Ki)
+        "ki_nm":                  6.4,      # experimentally measured Ki, nM
+        "binding_box": {
+            "center": [18.0, 22.0, 14.0],
+            "size":   [18.0, 18.0, 18.0],
+        },
+    },
     "insulin_receptor": {
         "pdb_id":                 "1IR3",
         "description":            "Insulin receptor kinase domain (diabetes)",
@@ -118,7 +131,7 @@ KNOWN_TARGETS: Dict[str, Dict] = {
 
 DISEASE_TARGET_MAP: Dict[str, set] = {
     "diabetes":  {"insulin_receptor", "dpp4", "glut4"},
-    "infection": {"ace2", "hiv_protease"},
+    "infection": {"ace2", "hiv_protease", "bca"},
 }
 
 # Reverse lookup: target → expected disease
@@ -178,18 +191,31 @@ def validate_disease_target_pair(target: str, disease: str) -> list:
 # When adding a new reference drug, add it here only.
 
 REFERENCE_DRUGS: Dict[str, str] = {
-    # Diabetes
+    # Diabetes — primary disease program
     "metformin":       "CN(C)C(=N)NC(=N)N",
     "sitagliptin":     "Fc1cc(c(F)cc1F)CC(N)CC(=O)N1CCn2c(nnc2CC1)C(F)(F)F",
     "empagliflozin":   "OC[C@@H]1O[C@@H](c2ccc(Cl)cc2-c2ccc(OCC3CCOCC3)cc2)[C@H](O)[C@@H](O)[C@@H]1O",
-    "glipizide":       "CC1=CN=C(S1)CN2C(=O)CCC2=O",
+    "glipizide":       "Cc1cnc(CN2C(=O)CCC2=O)s1",
     "semaglutide_core":"CC(C)(C)NCC(=O)N1CCC[C@H]1C(=O)N",
     "linagliptin":     "CN1C=NC2=C1C(=O)N(C(=O)N2CC3=CC=CC(=C3)F)C4CCCCC4",
+
+    # Bacterial carbonic anhydrase — primary active program
+    "acetazolamide":   "CC(=O)Nc1nnc(s1)S(N)(=O)=O",   # Ki=6.4 nM vs H. pylori bCA (PDB 3CYU)
 
     # Infection / cardiovascular
     "lopinavir":       "CC1=CC(=C(C=C1)C2=CC=CC=C2)NC(=O)C[C@@H](CC3=CC=CC=C3)NC(=O)[C@H](CC(C)C)NC(=O)C4=CN=CC=C4",
     "remdesivir":      "CCC(CC)COC(=O)[C@@H](N[P@@](=O)(OC[C@H]1O[C@@H]([C@@H]([C@@H]1O)O)n2cnc3c(N)ncnc23)Oc4ccccc4)C",
     "azithromycin":    "CC[C@@H]1[C@@]([C@@H]([C@H](N(C)[C@@H]1[C@@H](C[C@@H](CC=O)OC)O)C)O[C@H]2C[C@@]([C@H]([C@@H](O2)C)OC3C[C@@H]([C@H]([C@@H](O3)C)N(C)C)O)(C)OC)(C)O",
+
+    # Common reference compounds for novelty sanity checks.
+    # A generated molecule is NOT novel if it is merely aspirin, paracetamol,
+    # ibuprofen, or caffeine. These were present in the historical local copies
+    # in sanitizer.py and scorer.py; they are now consolidated here so all
+    # novelty checks share one list.
+    "aspirin":         "CC(=O)Oc1ccccc1C(=O)O",
+    "paracetamol":     "CC(=O)Nc1ccc(O)cc1",
+    "ibuprofen":       "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+    "caffeine":        "Cn1cnc2c1c(=O)n(c(=O)n2C)C",
 }
 
 # Tanimoto similarity threshold above which a generated molecule is considered

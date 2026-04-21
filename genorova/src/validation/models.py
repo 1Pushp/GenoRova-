@@ -74,6 +74,114 @@ class PAINSMatch(BaseModel):
     )
 
 
+class NoveltyProvenance(BaseModel):
+    """Auditable record of which novelty checks ran and what each check found."""
+
+    local_db_checked: bool = Field(
+        description="True when the local Genorova database lookup was actually performed."
+    )
+    local_db_match_found: bool = Field(
+        description="True when the local Genorova database lookup found a match."
+    )
+    reference_exact_match_checked: bool = Field(
+        description="True when the exact-match screen against canonical reference drugs ran."
+    )
+    reference_exact_match_found: bool = Field(
+        description="True when the exact-match reference screen found a match."
+    )
+    tanimoto_checked: bool = Field(
+        description="True when the Tanimoto analogue screen was actually computed."
+    )
+    closest_reference: Optional[str] = Field(
+        default=None,
+        description="Closest approved reference drug identified during novelty checking.",
+    )
+    closest_reference_tanimoto: Optional[float] = Field(
+        default=None,
+        description="Tanimoto similarity to the closest approved reference drug.",
+    )
+    tanimoto_threshold: Optional[float] = Field(
+        default=None,
+        description="Canonical Tanimoto threshold used in the novelty decision.",
+    )
+    pubchem_checked: bool = Field(
+        description="True when a PubChem lookup actually completed."
+    )
+    pubchem_match_found: bool = Field(
+        description="True when PubChem lookup found an existing compound match."
+    )
+    pubchem_enabled: bool = Field(
+        description="True when the caller enabled PubChem novelty lookup."
+    )
+    final_novelty_status: Literal["known", "uncertain", "potentially_novel"] = Field(
+        description="Final outward-facing novelty status after all available checks."
+    )
+    final_novelty_reason: str = Field(
+        description="Short plain-language reason for the final novelty status."
+    )
+    provenance_explanation: str = Field(
+        description="Plain-language summary of which checks ran, what they found, and why the final label was assigned."
+    )
+
+
+class ADMETProvenance(BaseModel):
+    """Auditable record of which ADMET checks ran and why the final safety label was assigned."""
+
+    hepatotoxicity_checked: bool = Field(
+        description="True when the hepatotoxicity screen actually ran."
+    )
+    hepatotoxicity_method: str = Field(
+        description="Method used for hepatotoxicity assessment, including fallback or not-run states."
+    )
+    hepatotoxicity_alerts: List[str] = Field(
+        default_factory=list,
+        description="Matched hepatotoxicity alerts or explanatory not-run notes."
+    )
+    hepatotoxicity_score: Optional[float] = Field(
+        default=None,
+        description="Heuristic hepatotoxicity score when available."
+    )
+    herg_checked: bool = Field(
+        description="True when the hERG screen actually ran."
+    )
+    herg_method: str = Field(
+        description="Method used for hERG assessment, including fallback or not-run states."
+    )
+    herg_alerts: List[str] = Field(
+        default_factory=list,
+        description="Matched hERG alerts or explanatory not-run notes."
+    )
+    herg_score: Optional[float] = Field(
+        default=None,
+        description="Heuristic hERG score when available."
+    )
+    cyp_checked: bool = Field(
+        description="True when the CYP interaction screen actually ran."
+    )
+    cyp_method: str = Field(
+        description="Method used for CYP interaction assessment, including fallback or not-run states."
+    )
+    cyp_alerts: List[str] = Field(
+        default_factory=list,
+        description="Matched CYP interaction alerts or explanatory not-run notes."
+    )
+    overall_safety_method: str = Field(
+        description="Canonical method used to combine the individual ADMET checks into the final safety label."
+    )
+    overall_safety_flag: Literal["likely_safe", "caution", "likely_unsafe", "unknown"] = Field(
+        description="Final outward-facing ADMET safety label."
+    )
+    overall_safety_reason: str = Field(
+        description="Short plain-language reason for the final safety label."
+    )
+    evidence_level: str = Field(
+        description="Honest evidence-strength label such as heuristic proxy, regex fallback, or incomplete."
+    )
+    provenance_explanation: str = Field(
+        description="Plain-language summary of which ADMET checks ran, what they found, and why the final safety label was assigned."
+    )
+
+
 class NoveltyStatus(BaseModel):
     """
     Structured novelty report for a molecule.
@@ -90,6 +198,9 @@ class NoveltyStatus(BaseModel):
         "unrealistic",
         "local_only_checked",
     ] = Field(description="Primary novelty classification.")
+    status: Literal["known", "uncertain", "potentially_novel"] = Field(
+        description="Stable outward-facing novelty bucket used across ranked payloads and reports."
+    )
 
     found_in_local_db: bool = Field(
         description="True if molecule matches local Genorova database."
@@ -104,13 +215,33 @@ class NoveltyStatus(BaseModel):
     pubchem_checked: bool = Field(
         description="Whether PubChem was actually queried (requires internet)."
     )
+    exact_reference_name: Optional[str] = Field(
+        default=None,
+        description="Approved reference-drug name when the SMILES is an exact canonical match.",
+    )
+    closest_reference: Optional[str] = Field(
+        default=None,
+        description="Closest approved reference drug used for novelty interpretation.",
+    )
     most_similar_drug: Optional[str] = Field(
         default=None,
-        description="Name of the approved drug with the highest Tanimoto similarity.",
+        description="Backward-compatible alias for the closest approved reference drug.",
     )
     max_tanimoto: Optional[float] = Field(
         default=None,
         description="Tanimoto similarity score (Morgan FP, radius 2) to most similar drug.",
+    )
+    tanimoto_threshold: float = Field(
+        description="Canonical Tanimoto threshold used to classify a known repurposing lead."
+    )
+    reason: str = Field(
+        description="Plain-language novelty explanation for faculty and non-technical reviewers."
+    )
+    novelty_provenance: NoveltyProvenance = Field(
+        description=(
+            "Canonical novelty provenance block showing which checks ran, what each "
+            "check found, and why the final novelty label was assigned."
+        ),
     )
     data_source: str = Field(
         default="local_db_lookup",
@@ -180,6 +311,86 @@ class ChemistryResult(_StageResult):
 # ---------------------------------------------------------------------------
 # B.  Target Engagement / Binding Result
 # ---------------------------------------------------------------------------
+
+class BindingProvenance(BaseModel):
+    """Auditable record of which binding path ran and why the final interpretation was assigned."""
+
+    binding_checked: bool = Field(
+        description="True when a binding path actually ran or was checked to completion."
+    )
+    binding_state: Literal[
+        "not_checked",
+        "checked_unavailable",
+        "attempted_failed",
+        "proxy_intentional",
+        "real_docking_executed",
+    ] = Field(
+        description=(
+            "Canonical one-word summary of the binding path outcome. "
+            "not_checked: path never evaluated (e.g. invalid SMILES). "
+            "checked_unavailable: path ran but produced no usable score or proxy. "
+            "attempted_failed: real docking attempted but runtime failed; fell back to proxy. "
+            "proxy_intentional: proxy path used intentionally (no active real-docking path, or path is blocked). "
+            "real_docking_executed: AutoDock Vina completed and returned a usable score."
+        )
+    )
+    binding_mode: Literal["real_docking", "scaffold_proxy", "fallback_proxy", "unavailable"] = Field(
+        description="Binding path used for the outward-facing result."
+    )
+    binding_mode_reason: str = Field(
+        description="Plain-language reason for why this binding path was used."
+    )
+    real_docking_status: str = Field(
+        description="ready / executed / runtime_failed / blocked / unsupported_target / not_checked_invalid_smiles"
+    )
+    real_docking_probe: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured readiness probe for the real docking path."
+    )
+    real_docking_failure: Optional[str] = Field(
+        default=None,
+        description="Exact blocker or runtime failure when real docking did not produce a usable result."
+    )
+    receptor_asset_checked: bool = Field(
+        description="True when the receptor asset lookup actually ran."
+    )
+    receptor_asset_available: bool = Field(
+        description="True when a prepared receptor asset was available."
+    )
+    docking_engine_checked: bool = Field(
+        description="True when the docking engine import/callable check actually ran."
+    )
+    docking_engine_available: bool = Field(
+        description="True when the docking engine was available for real docking."
+    )
+    comparator_name: str = Field(
+        description="Reference comparator name used for the binding interpretation."
+    )
+    comparator_score: Optional[float] = Field(
+        default=None,
+        description="Comparator score used in the binding comparison."
+    )
+    candidate_score: Optional[float] = Field(
+        default=None,
+        description="Candidate binding score from real docking or proxy mode."
+    )
+    delta_vs_reference: Optional[float] = Field(
+        default=None,
+        description="Candidate minus comparator score."
+    )
+    key_interactions_available: bool = Field(
+        description="True when key interaction residues were available from the binding path."
+    )
+    evidence_level: str = Field(
+        description="Honest evidence-strength label for the binding stage."
+    )
+    final_binding_reason: str = Field(
+        description="Short plain-language binding interpretation."
+    )
+    provenance_explanation: str = Field(
+        description="Plain-language summary of which binding path ran, what blocked real docking if any, and why the final interpretation was assigned."
+    )
+
 
 class BindingResult(_StageResult):
     """
@@ -252,9 +463,45 @@ class BindingResult(_StageResult):
         default="",
         description="Plain-language interpretation of the binding result.",
     )
+    final_binding_reason: str = Field(
+        default="",
+        description="Stable outward-facing binding interpretation used across API and reports.",
+    )
     evidence_level: str = Field(
         default="unavailable",
         description="real_docking / proxy_screening / fallback_proxy / unavailable",
+    )
+    binding_checked: bool = Field(
+        default=False,
+        description="True when a binding path actually ran or was checked to completion.",
+    )
+    binding_state: Literal[
+        "not_checked",
+        "checked_unavailable",
+        "attempted_failed",
+        "proxy_intentional",
+        "real_docking_executed",
+    ] = Field(
+        default="not_checked",
+        description=(
+            "Canonical one-word summary of the binding path outcome — "
+            "mirrors binding_provenance.binding_state for quick access without unpacking the provenance block."
+        ),
+    )
+    binding_evidence_level: str = Field(
+        default="unavailable",
+        description="Honest evidence-strength label for the binding stage.",
+    )
+    binding_provenance: BindingProvenance = Field(
+        description=(
+            "Canonical binding provenance block showing which path ran, what blocked "
+            "real docking if any, what comparator was used, and why the final binding "
+            "interpretation was assigned."
+        ),
+    )
+    binding_provenance_explanation: str = Field(
+        default="",
+        description="Faculty-facing plain-language summary of the binding provenance block.",
     )
     mode_reason: str = Field(
         default="",
@@ -297,6 +544,13 @@ class RiskLevel(BaseModel):
         default_factory=list,
         description="Structural alerts or rules that contributed to this risk level.",
     )
+    checked: bool = Field(
+        default=True,
+        description=(
+            "True when this ADMET check actually ran, including regex fallback mode. "
+            "False when the check could not be completed."
+        ),
+    )
     method: str = Field(
         description=(
             "How the risk was estimated.  Always read this before acting on level.  "
@@ -334,6 +588,24 @@ class ADMETResult(_StageResult):
             "unknown: assessment incomplete."
         ),
     )
+    overall_safety_reason: str = Field(
+        description="Plain-language explanation for why the overall safety label was assigned."
+    )
+    overall_safety_method: str = Field(
+        description="Canonical method label for the overall safety interpretation."
+    )
+    admet_evidence_level: str = Field(
+        description="Honest evidence-strength label for the ADMET stage."
+    )
+    admet_provenance: ADMETProvenance = Field(
+        description=(
+            "Canonical ADMET provenance block showing which safety checks ran, "
+            "which were skipped, what alerts were found, and why the final safety label was assigned."
+        ),
+    )
+    admet_provenance_explanation: str = Field(
+        description="Faculty-facing plain-language summary of the ADMET provenance block."
+    )
     safety_score: float = Field(
         description=(
             "Composite safety score: 0.0 (highest risk) – 1.0 (lowest risk).  "
@@ -354,6 +626,76 @@ class ADMETResult(_StageResult):
 # ---------------------------------------------------------------------------
 # D.  Clinical Utility Result
 # ---------------------------------------------------------------------------
+
+class DecisionProvenance(BaseModel):
+    """
+    Canonical decision provenance block for the Clinical Utility stage.
+
+    Records which comparator was used, what each evidence category contributed,
+    what penalties or hard blockers applied, and why the final advancement
+    label was assigned.  A faculty reviewer can use this block to audit any
+    final decision without inspecting raw score internals.
+    """
+
+    decision_checked: bool = Field(
+        description="True when the clinical evaluation path actually ran to completion."
+    )
+    final_decision: Literal["advance", "conditional_advance", "reject"] = Field(
+        description="Canonical advancement verdict."
+    )
+    decision_score: float = Field(
+        description="Composite evidence-weighted score that drove the verdict (0.0 – 1.0)."
+    )
+    decision_method: str = Field(
+        description="Algorithm used to produce the composite score (e.g. evidence_weighted_composite_score)."
+    )
+    comparator_name: str = Field(
+        description="Name of the reference drug used as the comparator in the composite scoring."
+    )
+    comparator_basis: str = Field(
+        description="Plain-language description of how the comparator was used and what weights were applied."
+    )
+    chemistry_contribution: str = Field(
+        description="Synthesizability and drug-likeness component contributions to the composite score."
+    )
+    binding_contribution: str = Field(
+        description="Target binding component contribution, including mode and weight."
+    )
+    novelty_contribution: str = Field(
+        description="Novelty component contribution, including flag category and weight."
+    )
+    admet_contribution: str = Field(
+        description="Safety (ADMET) component contribution, including safety flag and weight."
+    )
+    ranking_penalties_applied: List[str] = Field(
+        default_factory=list,
+        description="Evidence-quality penalties applied by the ranking layer (e.g. proxy binding, PAINS)."
+    )
+    hard_gates_triggered: List[str] = Field(
+        default_factory=list,
+        description="Hard rejection gates that triggered (e.g. invalid SMILES, high safety risk)."
+    )
+    confidence_tier: Literal["high", "medium", "low"] = Field(
+        description="Confidence level of the final decision: high=advance, medium=conditional, low=reject."
+    )
+    evidence_level: Literal["full_criteria_met", "partial_criteria_met", "criteria_not_met"] = Field(
+        description="Whether evidence fully, partially, or did not meet the scoring criteria."
+    )
+    final_decision_reason: str = Field(
+        description="Short plain-language reason for the final advancement label."
+    )
+    conditions: List[str] = Field(
+        default_factory=list,
+        description="Conditions that must be resolved before advancing (conditional_advance only)."
+    )
+    rejection_reasons: List[str] = Field(
+        default_factory=list,
+        description="Specific rejection reasons when decision is reject."
+    )
+    provenance_explanation: str = Field(
+        description="Faculty-facing plain-language summary of the decision path."
+    )
+
 
 class ClinicalComparison(BaseModel):
     """
@@ -420,6 +762,264 @@ class ClinicalResult(_StageResult):
         default="",
         description="Suggested next experimental or computational step.",
     )
+    decision_provenance: Optional[Any] = Field(
+        default=None,
+        description=(
+            "Canonical decision provenance block showing which comparator was used, "
+            "what each evidence category contributed, what penalties or hard blockers "
+            "applied, and why the final advancement label was assigned."
+        ),
+    )
+
+
+class FacultyExplanationSection(BaseModel):
+    """One faculty-facing explanation section with explicit evidence roles."""
+
+    summary: str = Field(
+        description="Short plain-language explanation for this stage."
+    )
+    supporting_evidence: List[str] = Field(
+        default_factory=list,
+        description="Evidence in the existing provenance that supports the current interpretation."
+    )
+    limiting_evidence: List[str] = Field(
+        default_factory=list,
+        description="Evidence that weakens certainty or narrows what can honestly be claimed."
+    )
+    blocking_evidence: List[str] = Field(
+        default_factory=list,
+        description="Evidence that directly blocks a stronger claim or advancement path."
+    )
+    skipped_or_unavailable_checks: List[str] = Field(
+        default_factory=list,
+        description="Checks that were skipped, blocked, or unavailable in the active path."
+    )
+    provenance_pointers: "FacultyExplanationProvenancePointers" = Field(
+        description=(
+            "Traceable pointers back to the canonical provenance fields that drove the "
+            "section summary, supporting evidence, limitations, blockers, and skipped checks."
+        )
+    )
+
+
+class FacultyExplanationProvenancePointers(BaseModel):
+    """Traceable provenance-field pointers for one faculty explanation layer."""
+
+    summary_sources: List[str] = Field(
+        default_factory=list,
+        description="Exact provenance fields that support the plain-language summary."
+    )
+    supporting_sources: List[str] = Field(
+        default_factory=list,
+        description="Exact provenance fields that support the positive evidence statements."
+    )
+    limiting_sources: List[str] = Field(
+        default_factory=list,
+        description="Exact provenance fields that explain the limitations or uncertainty statements."
+    )
+    blocking_sources: List[str] = Field(
+        default_factory=list,
+        description="Exact provenance fields that support the blocking or disqualifying statements."
+    )
+    skipped_sources: List[str] = Field(
+        default_factory=list,
+        description="Exact provenance fields that show which checks were skipped or unavailable."
+    )
+
+
+class FacultyExplanation(BaseModel):
+    """Canonical faculty-facing explanation stack shared across active outputs."""
+
+    novelty_summary: FacultyExplanationSection = Field(
+        description="Novelty explanation derived from the canonical novelty provenance."
+    )
+    admet_summary: FacultyExplanationSection = Field(
+        description="ADMET explanation derived from the canonical ADMET provenance."
+    )
+    binding_summary: FacultyExplanationSection = Field(
+        description="Binding explanation derived from the canonical binding provenance."
+    )
+    decision_summary: FacultyExplanationSection = Field(
+        description="Final decision explanation derived from the canonical decision provenance."
+    )
+    overall_summary: str = Field(
+        description="Short faculty-readable paragraph tying novelty, ADMET, binding, and the final decision into one chain."
+    )
+    overall_summary_provenance_pointers: FacultyExplanationProvenancePointers = Field(
+        description=(
+            "Traceable pointers back to the canonical provenance fields used in the overall "
+            "faculty-facing summary paragraph."
+        )
+    )
+
+
+class FacultySummaryRollup(BaseModel):
+    """Compact faculty-review summary reused in compare-mode presentation payloads."""
+
+    label: Optional[str] = Field(
+        default=None,
+        description="Display label for the candidate within the active compare surface."
+    )
+    smiles: Optional[str] = Field(
+        default=None,
+        description="Candidate SMILES string for direct identification in compare mode."
+    )
+    rank_score: Optional[float] = Field(
+        default=None,
+        description="Evidence-weighted comparison score used for the current ordering."
+    )
+    rank_label: Optional[str] = Field(
+        default=None,
+        description="Human-readable ranking label already assigned by the canonical ranking logic."
+    )
+    candidate_status: Optional[str] = Field(
+        default=None,
+        description="Current candidate status or final decision label."
+    )
+    confidence_tier: Optional[str] = Field(
+        default=None,
+        description="Current confidence tier carried from the canonical decision payload."
+    )
+    main_strengths: List[str] = Field(
+        default_factory=list,
+        description="Short faculty-readable strengths lifted from the canonical explanation sections."
+    )
+    main_limitations: List[str] = Field(
+        default_factory=list,
+        description="Short faculty-readable limitations lifted from the canonical explanation sections."
+    )
+    final_recommendation: Optional[str] = Field(
+        default=None,
+        description="Current recommendation label already produced by the canonical ranking logic."
+    )
+    overall_summary: str = Field(
+        description="Top faculty-readable summary paragraph for this candidate."
+    )
+    overall_summary_provenance_pointers: FacultyExplanationProvenancePointers = Field(
+        description="Traceability pointers backing the overall faculty summary paragraph."
+    )
+    decision_summary: FacultyExplanationSection = Field(
+        description="Canonical final-decision section reused by summary cards and reports."
+    )
+    faculty_explanation: FacultyExplanation = Field(
+        description="Full canonical faculty explanation stack backing this summary rollup."
+    )
+
+
+class ComparisonPresentationPreferredCandidate(BaseModel):
+    """Identity block for the currently preferred candidate in compare mode."""
+
+    side: Literal["left", "right"] = Field(
+        description="Which side of the comparison is currently preferred."
+    )
+    label: Optional[str] = Field(
+        default=None,
+        description="Display label for the preferred candidate."
+    )
+    smiles: Optional[str] = Field(
+        default=None,
+        description="Preferred candidate SMILES string."
+    )
+
+
+class ComparisonPresentationSectionCandidate(BaseModel):
+    """One side of a compare-mode section row."""
+
+    label: Optional[str] = Field(
+        default=None,
+        description="Display label for this side of the comparison row."
+    )
+    smiles: Optional[str] = Field(
+        default=None,
+        description="Candidate SMILES string for this side of the comparison row."
+    )
+    is_preferred: bool = Field(
+        default=False,
+        description="Whether this side is the currently preferred candidate."
+    )
+    section: FacultyExplanationSection = Field(
+        description="Canonical faculty explanation section reused directly in compare mode."
+    )
+
+
+class ComparisonPresentationSection(BaseModel):
+    """Parallel compare-mode section row shared by UI and report output."""
+
+    step: str = Field(description="Ordered faculty review step label.")
+    title: str = Field(description="Faculty-readable section title.")
+    left_candidate: ComparisonPresentationSectionCandidate = Field(
+        description="Left-side section content."
+    )
+    right_candidate: ComparisonPresentationSectionCandidate = Field(
+        description="Right-side section content."
+    )
+
+
+class ComparisonPresentationSections(BaseModel):
+    """Named ordered comparison sections shared across active compare outputs."""
+
+    novelty: ComparisonPresentationSection = Field(
+        description="Parallel novelty comparison content."
+    )
+    admet: ComparisonPresentationSection = Field(
+        description="Parallel ADMET comparison content."
+    )
+    binding: ComparisonPresentationSection = Field(
+        description="Parallel binding comparison content."
+    )
+    final_decision: ComparisonPresentationSection = Field(
+        description="Parallel final-decision comparison content."
+    )
+
+
+class ComparisonPresentationSectionSummaries(BaseModel):
+    """Paired plain-language section summaries for both candidates, shared by UI and report."""
+
+    novelty: str = Field(
+        description="Paired plain-language novelty summary: preferred candidate then other candidate."
+    )
+    admet: str = Field(
+        description="Paired plain-language ADMET summary: preferred candidate then other candidate."
+    )
+    binding: str = Field(
+        description="Paired plain-language binding summary: preferred candidate then other candidate."
+    )
+    decision: str = Field(
+        description="Paired plain-language final-decision summary: preferred candidate then other candidate."
+    )
+
+
+class ComparisonPresentation(BaseModel):
+    """Canonical compare-mode presentation payload shared by UI and report output."""
+
+    preferred_candidate: ComparisonPresentationPreferredCandidate = Field(
+        description="Identity block for the currently preferred candidate."
+    )
+    preferred_reason: str = Field(
+        description="Short plain-language explanation for why the preferred candidate currently leads."
+    )
+    confidence_limits: List[str] = Field(
+        default_factory=list,
+        description="Current evidence limitations that reduce confidence in the preference."
+    )
+    full_comparison_note: str = Field(
+        description="Full canonical comparison note tying the preference back to the faculty explanation stack."
+    )
+    left_candidate_summary: FacultySummaryRollup = Field(
+        description="Faculty-summary rollup for the left-side candidate."
+    )
+    right_candidate_summary: FacultySummaryRollup = Field(
+        description="Faculty-summary rollup for the right-side candidate."
+    )
+    comparison_sections: ComparisonPresentationSections = Field(
+        description="Ordered section-level comparison content reused across compare-mode outputs."
+    )
+    section_summaries: ComparisonPresentationSectionSummaries = Field(
+        description="Paired plain-language section summaries consumed by UI and report instead of locally derived strings."
+    )
+    score_note: str = Field(
+        description="Plain-language note on the evidence-weighted score comparison, shared by UI and report."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -429,12 +1029,16 @@ class ClinicalResult(_StageResult):
 class EvidenceLedgerBinding(BaseModel):
     """Binding sub-record in the evidence ledger."""
     mode: str = Field(description="real_docking / scaffold_proxy / fallback_proxy / unavailable")
+    binding_checked: bool = Field(default=False)
     score: Optional[float] = Field(default=None)
     reference_drug: str = Field(default="unknown")
     reference_score: Optional[float] = Field(default=None)
     delta: Optional[float] = Field(default=None)
     comparator_note: str = Field(default="")
+    final_binding_reason: str = Field(default="")
     evidence_level: str = Field(description="real_docking / heuristic_proxy / fallback_proxy / unavailable")
+    provenance: Dict[str, Any] = Field(default_factory=dict)
+    provenance_explanation: str = Field(default="")
     mode_reason: str = Field(default="")
     real_docking_status: str = Field(default="blocked")
     real_docking_failure: Optional[str] = Field(default=None)
@@ -494,6 +1098,13 @@ class EvidenceLedger(BaseModel):
             "written for non-technical faculty reviewers."
         )
     )
+    faculty_explanation: Optional[FacultyExplanation] = Field(
+        default=None,
+        description=(
+            "Canonical faculty-facing explanation stack that reorganizes the existing "
+            "novelty, ADMET, binding, and decision provenance into one readable flow."
+        ),
+    )
     dt_warnings: List[str] = Field(
         default_factory=list,
         description="Disease-target consistency warnings (empty = no issues).",
@@ -525,8 +1136,104 @@ class ValidationResult(BaseModel):
     final_decision: Literal["advance", "conditional_advance", "reject"] = Field(
         description="Mirrors ClinicalResult.decision for quick access.",
     )
+    binding_checked: bool = Field(
+        description="Top-level binding check status for quick review across API and report surfaces."
+    )
+    binding_mode: Literal["real_docking", "scaffold_proxy", "fallback_proxy", "unavailable"] = Field(
+        description="Top-level binding mode for quick review across API and report surfaces."
+    )
+    binding_evidence_level: str = Field(
+        description="Top-level evidence-strength label for the binding stage."
+    )
+    final_binding_reason: str = Field(
+        description="Top-level plain-language binding interpretation for summaries and reports."
+    )
+    binding_provenance: BindingProvenance = Field(
+        description=(
+            "Canonical binding provenance block showing which path ran, what blocked "
+            "real docking if any, what comparator was used, and why the final binding "
+            "interpretation was assigned."
+        ),
+    )
+    binding_provenance_explanation: str = Field(
+        description="Faculty-facing plain-language summary of the binding provenance block."
+    )
+    novelty_status: Literal["known", "uncertain", "potentially_novel"] = Field(
+        description="Top-level novelty bucket for quick review across API and report surfaces.",
+    )
+    novelty_closest_reference: Optional[str] = Field(
+        default=None,
+        description="Closest approved reference drug surfaced for quick faculty review.",
+    )
+    novelty_tanimoto_score: Optional[float] = Field(
+        default=None,
+        description="Tanimoto similarity to the surfaced closest approved reference drug.",
+    )
+    novelty_threshold: Optional[float] = Field(
+        default=None,
+        description="Canonical Tanimoto threshold used in the novelty classification.",
+    )
+    novelty_reason: str = Field(
+        description="Plain-language novelty explanation surfaced in summaries and reports.",
+    )
+    novelty_provenance: NoveltyProvenance = Field(
+        description=(
+            "Canonical novelty provenance block showing which novelty checks ran, "
+            "which were skipped, and why the final novelty label was assigned."
+        ),
+    )
+    overall_safety_flag: Literal["likely_safe", "caution", "likely_unsafe", "unknown"] = Field(
+        description="Top-level ADMET safety label for quick review across API and report surfaces."
+    )
+    overall_safety_reason: str = Field(
+        description="Plain-language explanation for why the ADMET safety label was assigned."
+    )
+    overall_safety_method: str = Field(
+        description="Canonical method label for the ADMET safety interpretation."
+    )
+    admet_evidence_level: str = Field(
+        description="Honest evidence-strength label for the ADMET stage."
+    )
+    admet_provenance: ADMETProvenance = Field(
+        description=(
+            "Canonical ADMET provenance block showing which checks ran, which were skipped, "
+            "what alerts were found, and why the final safety label was assigned."
+        ),
+    )
+    admet_provenance_explanation: str = Field(
+        description="Faculty-facing plain-language summary of the ADMET provenance block."
+    )
+    decision_provenance: Optional[DecisionProvenance] = Field(
+        default=None,
+        description=(
+            "Top-level decision provenance block for quick faculty review without "
+            "opening the nested clinical stage."
+        ),
+    )
+    decision_provenance_explanation: Optional[str] = Field(
+        default=None,
+        description="Faculty-facing plain-language summary of the decision provenance block."
+    )
+    final_decision_reason: Optional[str] = Field(
+        default=None,
+        description="Top-level plain-language explanation for the final advancement label."
+    )
+    decision_confidence_tier: Optional[Literal["high", "medium", "low"]] = Field(
+        default=None,
+        description="Top-level confidence tier for the final decision."
+    )
+    decision_evidence_level: Optional[str] = Field(
+        default=None,
+        description="Top-level evidence-strength label for the final decision."
+    )
     summary: str = Field(
-        description="One-paragraph plain-language summary of all four stages.",
+        description="Canonical one-paragraph faculty-facing summary of novelty, ADMET, binding, and the final decision.",
+    )
+    faculty_explanation: FacultyExplanation = Field(
+        description=(
+            "Canonical faculty-facing explanation stack shared across top candidate "
+            "payloads, full validation results, chat, and report output."
+        ),
     )
 
     # Evidence ledger — scientific honesty record for each candidate

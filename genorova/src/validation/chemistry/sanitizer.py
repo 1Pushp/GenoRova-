@@ -48,6 +48,20 @@ _REPO_DIR = _SRC_DIR.parent                       # genorova/
 _DB_PATH  = _REPO_DIR / "outputs" / "genorova_memory.db"
 
 # ---------------------------------------------------------------------------
+# Canonical reference drug list — single source of truth
+# ---------------------------------------------------------------------------
+# Import from reference_data so that all novelty checking across sanitizer,
+# scorer, and pipeline uses exactly the same drug list and threshold.
+import sys as _sys
+if str(_SRC_DIR) not in _sys.path:
+    _sys.path.insert(0, str(_SRC_DIR))
+
+from validation.reference_data import (  # noqa: E402
+    REFERENCE_DRUGS,
+    TANIMOTO_KNOWN_THRESHOLD,
+)
+
+# ---------------------------------------------------------------------------
 # Lazy RDKit loader (same pattern used throughout Genorova)
 # ---------------------------------------------------------------------------
 
@@ -105,20 +119,8 @@ def _try_load_rdkit() -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# Known reference drugs (shared with scorer.py and validate.py)
-# ---------------------------------------------------------------------------
-
-REFERENCE_DRUGS: dict[str, str] = {
-    "metformin":      "CN(C)C(=N)NC(=N)N",
-    "sitagliptin":    "Fc1cc(c(F)cc1F)CC(N)CC(=O)N1CCn2c(nnc2CC1)C(F)(F)F",
-    "empagliflozin":  "OC[C@@H]1O[C@@H](c2ccc(Cl)cc2-c2ccc(OCC3CCOCC3)cc2)[C@H](O)[C@@H](O)[C@@H]1O",
-    "glipizide":      "Cc1cnc(CN2C(=O)CCC2=O)s1",
-    "aspirin":        "CC(=O)Oc1ccccc1C(=O)O",
-    "paracetamol":    "CC(=O)Nc1ccc(O)cc1",
-    "ibuprofen":      "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
-    "caffeine":       "Cn1cnc2c1c(=O)n(c(=O)n2C)C",
-}
+# REFERENCE_DRUGS and TANIMOTO_KNOWN_THRESHOLD are imported from
+# validation.reference_data above — do not redefine them here.
 
 
 # ---------------------------------------------------------------------------
@@ -260,19 +262,20 @@ def check_pains(smiles: str) -> Tuple[bool, List[dict], str]:
 # 3.  Novelty Lookup
 # ---------------------------------------------------------------------------
 
-def _tanimoto_vs_approved(smiles: str) -> Tuple[Optional[float], Optional[str]]:
+def _tanimoto_vs_approved(smiles: str) -> Tuple[Optional[float], Optional[str], bool]:
     """
     Compute maximum Tanimoto similarity (Morgan FP radius 2, 2048 bits)
     between the query molecule and each known reference drug.
 
-    Returns (max_similarity, drug_name) or (None, None) on failure.
+    Returns (max_similarity, drug_name, checked) where checked=False means
+    the similarity computation could not be performed.
     """
     if not _try_load_rdkit():
-        return None, None
+        return None, None, False
 
     mol = _Chem.MolFromSmiles(smiles)
     if mol is None:
-        return None, None
+        return None, None, False
 
     try:
         fp_query = _AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048)
@@ -289,10 +292,12 @@ def _tanimoto_vs_approved(smiles: str) -> Tuple[Optional[float], Optional[str]]:
                 best_sim = sim
                 best_name = drug_name
 
-        return (round(best_sim, 4), best_name) if best_name else (None, None)
+        if best_name:
+            return round(best_sim, 4), best_name, True
+        return None, None, True
 
     except Exception:
-        return None, None
+        return None, None, False
 
 
 def _check_pubchem(smiles: str, timeout: int = 10) -> Tuple[Optional[int], bool]:
@@ -331,22 +336,238 @@ def _check_pubchem(smiles: str, timeout: int = 10) -> Tuple[Optional[int], bool]
         return None, False
 
 
-def _check_local_db(smiles: str, db_path: Path = _DB_PATH) -> bool:
+def _check_local_db(smiles: str, db_path: Path = _DB_PATH) -> Tuple[bool, bool]:
     """
     Check if the exact SMILES string exists in the Genorova SQLite database.
-    Returns True if found (= already generated before), False otherwise.
+    Returns (checked, found). checked=False means the lookup was skipped or
+    unavailable, which is distinct from checked=True + found=False.
     """
     if not db_path.exists():
-        return False
+        return False, False
     try:
         conn = sqlite3.connect(str(db_path))
         cur  = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM molecules WHERE smiles = ?", (smiles,))
         count = cur.fetchone()[0]
         conn.close()
-        return count > 0
+        return True, count > 0
     except Exception:
-        return False
+        return False, False
+
+
+def _reference_name_for_exact_smiles(smiles: str) -> Optional[str]:
+    """Return the canonical reference-drug name when the SMILES is an exact match."""
+    for drug_name, drug_smiles in REFERENCE_DRUGS.items():
+        if smiles == drug_smiles:
+            return drug_name
+    return None
+
+
+def novelty_status_from_flag(novelty_flag: str) -> str:
+    """
+    Map raw novelty flags to the stable outward-facing status buckets.
+
+    These buckets are intentionally conservative and are reused by the
+    science path, validation pipeline, API payloads, and reports.
+    """
+    if novelty_flag in {"known_repurposing_lead", "unrealistic"}:
+        return "known"
+    if novelty_flag == "potentially_novel_patentable":
+        return "potentially_novel"
+    return "uncertain"
+
+
+def _check_summary(label: str, checked: bool, found: bool) -> str:
+    """Render a simple checked/no-match/not-checked summary for provenance text."""
+    if not checked:
+        return f"{label} not checked"
+    if found:
+        return f"{label} checked, match found"
+    return f"{label} checked, no match"
+
+
+def _tanimoto_summary(provenance: dict) -> str:
+    """Render the Tanimoto-specific provenance summary."""
+    if not provenance.get("tanimoto_checked"):
+        return "Tanimoto analogue screen not checked"
+
+    closest_reference = provenance.get("closest_reference")
+    tanimoto = provenance.get("closest_reference_tanimoto")
+    threshold = provenance.get("tanimoto_threshold")
+    if closest_reference and tanimoto is not None and threshold is not None:
+        relation = "meets or exceeds" if tanimoto >= threshold else "is below"
+        return (
+            f"Tanimoto analogue screen checked against {closest_reference} "
+            f"({tanimoto:.2f}), which {relation} the {threshold:.2f} threshold"
+        )
+    return "Tanimoto analogue screen checked, but no comparable reference result was available"
+
+
+def _pubchem_summary(provenance: dict) -> str:
+    """Render the PubChem provenance summary."""
+    if not provenance.get("pubchem_enabled"):
+        return "PubChem lookup not enabled"
+    if not provenance.get("pubchem_checked"):
+        return "PubChem lookup was enabled but not completed"
+    if provenance.get("pubchem_match_found"):
+        return "PubChem lookup checked, match found"
+    return "PubChem lookup checked, no match found"
+
+
+def build_novelty_provenance(novelty_result: Optional[dict]) -> dict:
+    """
+    Build the canonical novelty provenance block from the sanitizer's raw results.
+
+    This block is the single auditable record of which novelty checks ran,
+    what each check found, and why the final novelty label was assigned.
+    """
+    novelty = dict(novelty_result or {})
+    novelty_flag = novelty.get("flag", "local_only_checked")
+    final_status = novelty.get("novelty_status") or novelty_status_from_flag(novelty_flag)
+    final_reason = novelty.get("novelty_reason") or novelty.get("reason") or ""
+
+    provenance = {
+        "local_db_checked": bool(novelty.get("local_db_checked", novelty.get("found_in_local_db") is not None)),
+        "local_db_match_found": bool(novelty.get("local_db_match_found", novelty.get("found_in_local_db", False))),
+        "reference_exact_match_checked": bool(
+            novelty.get("reference_exact_match_checked", novelty.get("found_in_approved_drugs") is not None)
+        ),
+        "reference_exact_match_found": bool(
+            novelty.get("reference_exact_match_found", novelty.get("found_in_approved_drugs", False))
+        ),
+        "tanimoto_checked": bool(
+            novelty.get(
+                "tanimoto_checked",
+                novelty.get("max_tanimoto") is not None or novelty.get("closest_reference") is not None,
+            )
+        ),
+        "closest_reference": novelty.get("closest_reference") or novelty.get("most_similar_drug") or novelty.get("exact_reference_name"),
+        "closest_reference_tanimoto": novelty.get("closest_reference_tanimoto", novelty.get("max_tanimoto")),
+        "tanimoto_threshold": novelty.get("tanimoto_threshold", TANIMOTO_KNOWN_THRESHOLD),
+        "pubchem_checked": bool(novelty.get("pubchem_checked", False)),
+        "pubchem_match_found": bool(
+            novelty.get("pubchem_match_found", novelty.get("pubchem_checked", False) and novelty.get("pubchem_cid") is not None)
+        ),
+        "pubchem_enabled": bool(novelty.get("pubchem_enabled", novelty.get("pubchem_checked", False))),
+        "final_novelty_status": final_status,
+        "final_novelty_reason": final_reason,
+    }
+
+    explanation = ". ".join(
+        [
+            _check_summary(
+                "Local database lookup",
+                provenance["local_db_checked"],
+                provenance["local_db_match_found"],
+            ),
+            _check_summary(
+                "Reference exact-match screen",
+                provenance["reference_exact_match_checked"],
+                provenance["reference_exact_match_found"],
+            ),
+            _tanimoto_summary(provenance),
+            _pubchem_summary(provenance),
+            f"Final novelty label: {final_status.replace('_', ' ')}. Reason: {final_reason.rstrip('.')}",
+        ]
+    ) + "."
+    provenance["provenance_explanation"] = explanation
+    return provenance
+
+
+def build_novelty_evidence(novelty_result: Optional[dict]) -> dict:
+    """
+    Build the plain-language novelty evidence block from the canonical sanitizer output.
+
+    Returned keys are stable and safe to expose in top-level API/report payloads.
+    """
+    novelty = dict(novelty_result or {})
+    novelty_flag = novelty.get("flag", "local_only_checked")
+    novelty_status = novelty_status_from_flag(novelty_flag)
+    closest_reference = (
+        novelty.get("closest_reference")
+        or novelty.get("most_similar_drug")
+        or novelty.get("exact_reference_name")
+    )
+    tanimoto_score = novelty.get("closest_reference_tanimoto", novelty.get("max_tanimoto"))
+    threshold = novelty.get("tanimoto_threshold", TANIMOTO_KNOWN_THRESHOLD)
+    found_in_local_db = novelty.get("found_in_local_db", False)
+    found_in_approved_drugs = novelty.get("found_in_approved_drugs", False)
+    pubchem_checked = novelty.get("pubchem_checked", False)
+    pubchem_cid = novelty.get("pubchem_cid")
+
+    if found_in_approved_drugs:
+        if closest_reference:
+            reason = (
+                f"Known reference / known drug: exact match to approved reference "
+                f"{closest_reference}."
+            )
+        else:
+            reason = "Known reference / known drug: exact match to an approved reference drug."
+    elif novelty_flag == "known_repurposing_lead":
+        if found_in_local_db:
+            reason = (
+                "Known repurposing lead: already present in the local Genorova database, "
+                "so it is not treated as a fresh novel candidate."
+            )
+        elif pubchem_checked and pubchem_cid is not None:
+            reason = (
+                f"Known repurposing lead: found in PubChem (CID {pubchem_cid}), so "
+                "Genorova does not frame it as novel."
+            )
+        elif closest_reference and tanimoto_score is not None:
+            reason = (
+                f"Known repurposing lead: closest approved reference is {closest_reference} "
+                f"(Tanimoto {tanimoto_score:.2f}), which meets or exceeds the "
+                f"{threshold:.2f} threshold."
+            )
+        else:
+            reason = (
+                "Known repurposing lead: close enough to a known reference that Genorova "
+                "does not present it as novel."
+            )
+    elif novelty_flag == "potentially_novel_patentable":
+        if closest_reference and tanimoto_score is not None:
+            reason = (
+                f"Potentially novel: not found in the local database or PubChem. "
+                f"Closest approved reference is {closest_reference} "
+                f"(Tanimoto {tanimoto_score:.2f}), below the {threshold:.2f} threshold."
+            )
+        else:
+            reason = "Potentially novel: not found in the local database or PubChem."
+    elif novelty_flag == "unrealistic":
+        reason = (
+            "Uncertain novelty: the structure is too short or unrealistic to treat as a "
+            "credible lead, so Genorova does not claim novelty."
+        )
+    else:
+        if closest_reference and tanimoto_score is not None:
+            reason = (
+                f"Uncertain novelty: closest approved reference is {closest_reference} "
+                f"(Tanimoto {tanimoto_score:.2f}), below the {threshold:.2f} threshold, "
+                "but PubChem was not checked."
+            )
+        else:
+            reason = (
+                "Uncertain novelty: only local checks were run, so an external novelty "
+                "claim would be premature."
+            )
+
+    provenance = build_novelty_provenance(
+        {
+            **novelty,
+            "novelty_status": novelty_status,
+            "novelty_reason": reason,
+        }
+    )
+    return {
+        "novelty_status": novelty_status,
+        "novelty_closest_reference": closest_reference,
+        "novelty_tanimoto_score": tanimoto_score,
+        "novelty_threshold": threshold,
+        "novelty_reason": reason,
+        "novelty_provenance": provenance,
+        "novelty_provenance_explanation": provenance["provenance_explanation"],
+    }
 
 
 def check_novelty(
@@ -367,24 +588,32 @@ def check_novelty(
     print(f"   [Novelty] Checking novelty for {smiles[:50]}...")
 
     # Layer 1: exact match in approved drugs
+    reference_exact_match_checked = True
     in_approved = smiles in REFERENCE_DRUGS.values()
     if in_approved:
         print("   [Novelty] Exact match in approved drug list.")
+    exact_reference_name = _reference_name_for_exact_smiles(smiles) if in_approved else None
 
     # Layer 2: exact match in local DB
-    in_local_db = _check_local_db(smiles)
+    local_db_checked, in_local_db = _check_local_db(smiles)
     if in_local_db:
         print("   [Novelty] Found in local Genorova database.")
+    elif not local_db_checked:
+        print("   [Novelty] Local Genorova database lookup unavailable.")
 
     # Tanimoto similarity to reference drugs
-    max_tanimoto, most_similar = _tanimoto_vs_approved(smiles)
+    max_tanimoto, most_similar, tanimoto_checked = _tanimoto_vs_approved(smiles)
+    if not tanimoto_checked:
+        print("   [Novelty] Tanimoto analogue screen unavailable.")
 
     # Layer 3: PubChem (optional)
+    pubchem_enabled = bool(pubchem_lookup)
     pubchem_cid, pubchem_checked = (None, False)
     if pubchem_lookup:
         pubchem_cid, pubchem_checked = _check_pubchem(smiles)
     else:
         print("   [Novelty] PubChem lookup skipped (pubchem_lookup=False).")
+    pubchem_match_found = pubchem_checked and pubchem_cid is not None
 
     # --- Determine flag ---
     # "unrealistic": very short SMILES (< 5 chars) = probably not a real drug lead
@@ -394,42 +623,70 @@ def check_novelty(
     elif in_approved or in_local_db:
         flag = "known_repurposing_lead"
 
-    elif pubchem_checked and pubchem_cid is not None:
+    elif pubchem_match_found:
         # Found in PubChem → known compound, useful as repurposing lead
         flag = "known_repurposing_lead"
 
-    elif max_tanimoto is not None and max_tanimoto >= 0.85:
-        # Very high similarity to a known drug → likely a close analogue
+    elif tanimoto_checked and max_tanimoto is not None and max_tanimoto >= TANIMOTO_KNOWN_THRESHOLD:
+        # High similarity to a known reference drug → classify as repurposing lead.
+        # Threshold comes from reference_data.TANIMOTO_KNOWN_THRESHOLD (currently
+        # 0.70) — the single canonical value for this classification decision.
         flag = "known_repurposing_lead"
 
-    elif not pubchem_checked:
-        # We didn't actually check PubChem; be honest about uncertainty
-        flag = "local_only_checked"
-
-    else:
+    elif (
+        local_db_checked
+        and reference_exact_match_checked
+        and tanimoto_checked
+        and pubchem_enabled
+        and pubchem_checked
+        and not pubchem_match_found
+    ):
         # Not found locally and not found in PubChem
         flag = "potentially_novel_patentable"
+
+    else:
+        # We did not complete an external novelty confirmation step.
+        flag = "local_only_checked"
 
     # Data source label
     if pubchem_checked:
         data_source = "pubchem_lookup"
-    elif in_local_db:
+    elif local_db_checked:
         data_source = "local_db_lookup"
     else:
-        data_source = "local_db_lookup"
+        data_source = "novelty_lookup_incomplete"
 
-    print(f"   [Novelty] Flag: {flag}  |  Max Tanimoto: {max_tanimoto}")
-
-    return {
-        "flag":                   flag,
-        "found_in_local_db":      in_local_db,
+    closest_reference = exact_reference_name or most_similar
+    raw_novelty_payload = {
+        "flag":                    flag,
+        "found_in_local_db":       in_local_db,
         "found_in_approved_drugs": in_approved,
-        "pubchem_cid":            pubchem_cid,
-        "pubchem_checked":        pubchem_checked,
-        "most_similar_drug":      most_similar,
-        "max_tanimoto":           max_tanimoto,
-        "data_source":            data_source,
+        "pubchem_cid":             pubchem_cid,
+        "pubchem_checked":         pubchem_checked,
+        "pubchem_match_found":     pubchem_match_found,
+        "pubchem_enabled":         pubchem_enabled,
+        "exact_reference_name":    exact_reference_name,
+        "closest_reference":       closest_reference,
+        "most_similar_drug":       closest_reference,
+        "max_tanimoto":            max_tanimoto,
+        "closest_reference_tanimoto": max_tanimoto,
+        "local_db_checked":        local_db_checked,
+        "local_db_match_found":    in_local_db,
+        "reference_exact_match_checked": reference_exact_match_checked,
+        "reference_exact_match_found": in_approved,
+        "tanimoto_checked":        tanimoto_checked,
+        # Threshold that was applied — sourced from reference_data.TANIMOTO_KNOWN_THRESHOLD.
+        # Expose it here so report / API consumers can see the exact cutoff used.
+        "tanimoto_threshold":      TANIMOTO_KNOWN_THRESHOLD,
+        "data_source":             data_source,
     }
+    novelty_evidence = build_novelty_evidence(raw_novelty_payload)
+    novelty_payload = {**raw_novelty_payload, **novelty_evidence}
+    novelty_payload["status"] = novelty_evidence["novelty_status"]
+    novelty_payload["reason"] = novelty_evidence["novelty_reason"]
+
+    print(f"   [Novelty] Flag: {flag}  |  Max Tanimoto: {max_tanimoto}  |  Threshold: {TANIMOTO_KNOWN_THRESHOLD}")
+    return novelty_payload
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +728,28 @@ def run_chemistry_sanity(
 
     if not valid:
         notes.append("SMILES could not be parsed. All downstream checks skipped.")
+        raw_invalid_novelty = {
+            "flag":                    "unrealistic",
+            "found_in_local_db":       False,
+            "found_in_approved_drugs": False,
+            "pubchem_cid":             None,
+            "pubchem_checked":         False,
+            "pubchem_match_found":     False,
+            "pubchem_enabled":         bool(pubchem_lookup),
+            "exact_reference_name":    None,
+            "closest_reference":       None,
+            "most_similar_drug":       None,
+            "max_tanimoto":            None,
+            "closest_reference_tanimoto": None,
+            "local_db_checked":        False,
+            "local_db_match_found":    False,
+            "reference_exact_match_checked": False,
+            "reference_exact_match_found": False,
+            "tanimoto_checked":        False,
+            "tanimoto_threshold":      TANIMOTO_KNOWN_THRESHOLD,
+            "data_source":             "novelty_lookup_incomplete",
+        }
+        invalid_novelty_evidence = build_novelty_evidence(raw_invalid_novelty)
         # Return a minimal failing result without running expensive checks
         return {
             "smiles":         smiles,
@@ -482,14 +761,10 @@ def run_chemistry_sanity(
             "pains_matches":  [],
             "pains_source":   "rdkit_computed" if rdkit_ok else "rdkit_unavailable",
             "novelty": {
-                "flag":                    "unrealistic",
-                "found_in_local_db":       False,
-                "found_in_approved_drugs": False,
-                "pubchem_cid":             None,
-                "pubchem_checked":         False,
-                "most_similar_drug":       None,
-                "max_tanimoto":            None,
-                "data_source":             "local_db_lookup",
+                **raw_invalid_novelty,
+                "status":                  invalid_novelty_evidence["novelty_status"],
+                "reason":                  invalid_novelty_evidence["novelty_reason"],
+                **invalid_novelty_evidence,
             },
             "passes_sanity":  False,
             "rdkit_available": rdkit_ok,

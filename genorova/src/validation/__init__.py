@@ -26,8 +26,21 @@ Modules:
     models.py                   — Pydantic v2 output schemas
 """
 
-from validation.pipeline import validate_molecule, validate_batch  # noqa: F401
 from validation.models import ValidationResult  # noqa: F401
 
 __version__ = "2.0.0"
 __all__ = ["validate_molecule", "validate_batch", "ValidationResult"]
+
+
+def validate_molecule(*args, **kwargs):
+    """Lazily import the pipeline entrypoint to avoid package import cycles."""
+    from validation.pipeline import validate_molecule as _validate_molecule
+
+    return _validate_molecule(*args, **kwargs)
+
+
+def validate_batch(*args, **kwargs):
+    """Lazily import the batch entrypoint to avoid package import cycles."""
+    from validation.pipeline import validate_batch as _validate_batch
+
+    return _validate_batch(*args, **kwargs)

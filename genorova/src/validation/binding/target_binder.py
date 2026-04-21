@@ -24,6 +24,7 @@ The result always includes:
   - real_docking_status
   - real_docking_failure
   - real_docking_probe
+  - binding_provenance
 
 This keeps downstream consumers honest about what really happened.
 """
@@ -160,6 +161,10 @@ def _build_real_docking_probe(target_key: str) -> dict[str, Any]:
         "rdkit_available": _try_load_rdkit(),
         "vina_executable": _resolve_vina_executable(),
         "vina_available": False,
+        "receptor_asset_checked": False,
+        "receptor_asset_available": False,
+        "docking_engine_checked": False,
+        "docking_engine_available": False,
         "docking_import_ok": False,
         "dock_molecule_available": False,
         "receptor_asset": None,
@@ -183,7 +188,9 @@ def _build_real_docking_probe(target_key: str) -> dict[str, Any]:
         probe["blockers"].append("AutoDock Vina executable was not found in PATH or the repo-local Genorova bundle.")
 
     receptor_asset, receptor_blockers = _resolve_receptor_asset(target_key)
+    probe["receptor_asset_checked"] = True
     probe["receptor_asset"] = str(receptor_asset) if receptor_asset else None
+    probe["receptor_asset_available"] = receptor_asset is not None
     probe["blockers"].extend(receptor_blockers)
 
     try:
@@ -193,15 +200,18 @@ def _build_real_docking_probe(target_key: str) -> dict[str, Any]:
 
         import docking.docking_engine as docking_engine  # noqa: PLC0415
 
+        probe["docking_engine_checked"] = True
         probe["docking_import_ok"] = True
         dock_callable = getattr(docking_engine, "dock_molecule", None)
         if callable(dock_callable):
             probe["dock_molecule_available"] = True
+            probe["docking_engine_available"] = True
         else:
             probe["blockers"].append(
                 "docking.docking_engine imports successfully but does not expose a callable dock_molecule(smiles, protein_pdbqt)."
             )
     except Exception as exc:
+        probe["docking_engine_checked"] = True
         probe["blockers"].append(f"Could not import docking.docking_engine: {exc}")
 
     if (
@@ -380,6 +390,8 @@ def _mode_reason(mode: str, probe: dict[str, Any]) -> str:
     blockers = probe.get("blockers") or []
     blocker_text = _collapse_blockers(blockers) or "No additional context available."
 
+    if probe.get("status") == "not_checked_invalid_smiles":
+        return "Binding was not checked because the SMILES could not be parsed."
     if mode == "real_docking":
         return "Real docking executed against a prepared receptor asset."
     if mode == "fallback_proxy":
@@ -407,6 +419,17 @@ def _binding_evidence_level(mode: str) -> str:
 
 def _collapse_blockers(blockers: List[str]) -> str:
     return "; ".join(item for item in blockers if item)
+
+
+def _binding_checked(mode: str, real_docking_status: str, candidate_score: Optional[float]) -> bool:
+    """Distinguish true not-checked states from checked-but-unavailable paths."""
+    if real_docking_status == "not_checked_invalid_smiles":
+        return False
+    if candidate_score is not None:
+        return True
+    if mode in {"real_docking", "scaffold_proxy", "fallback_proxy"}:
+        return True
+    return real_docking_status in {"blocked", "runtime_failed", "unsupported_target"}
 
 
 def _interpret_binding(
@@ -475,6 +498,157 @@ def _interpret_binding(
     return f"Binding is unavailable. Reason: {mode_reason}"
 
 
+def _canonical_binding_state(
+    binding_checked: bool,
+    mode: str,
+    real_docking_status: str,
+) -> str:
+    """
+    Map the binding path outcome to one of five canonical state labels.
+
+    not_checked           — binding path never evaluated (e.g. invalid SMILES)
+    checked_unavailable   — binding was inspected but no score or proxy could be produced
+    attempted_failed      — real docking was attempted but the runtime failed; fell back to proxy
+    proxy_intentional     — a proxy path was used intentionally (no active real-docking path exists,
+                            or the nominal path is blocked and the system fell to structural proxy)
+    real_docking_executed — AutoDock Vina completed and returned a usable binding score
+    """
+    if not binding_checked:
+        return "not_checked"
+    if mode == "real_docking" and real_docking_status == "executed":
+        return "real_docking_executed"
+    if mode == "fallback_proxy" and real_docking_status == "runtime_failed":
+        return "attempted_failed"
+    if mode in {"fallback_proxy", "scaffold_proxy"}:
+        return "proxy_intentional"
+    # mode == "unavailable" with binding_checked=True: the path ran but produced nothing usable
+    return "checked_unavailable"
+
+
+def build_binding_provenance(binding_result: dict) -> dict:
+    """
+    Build one canonical binding provenance block from the active binding result.
+
+    This is the only place that converts internal binding-path state into the
+    outward-facing provenance record used by pipeline, API, chat, and reports.
+    """
+    probe = dict(binding_result.get("real_docking_probe") or {})
+    mode = str(binding_result.get("mode", "unavailable"))
+    real_docking_status = str(binding_result.get("real_docking_status", "blocked"))
+    candidate_score = binding_result.get("docking_score")
+    comparator_score = binding_result.get("reference_score")
+    delta = binding_result.get("delta_vs_reference")
+    final_reason = str(
+        binding_result.get("interpretation")
+        or binding_result.get("mode_reason")
+        or "Binding interpretation not available."
+    )
+    binding_checked = _binding_checked(mode, real_docking_status, candidate_score)
+    key_interactions_available = bool(
+        list(binding_result.get("key_h_bonds") or []) or list(binding_result.get("key_hydrophobic") or [])
+    )
+    evidence_level = str(binding_result.get("evidence_level", _binding_evidence_level(mode)))
+    comparator_name = str(binding_result.get("reference_drug", "unknown"))
+    blocking_detail = (
+        str(binding_result.get("real_docking_failure") or "").strip()
+        or _collapse_blockers(list(probe.get("blockers") or []))
+    )
+    binding_state = _canonical_binding_state(binding_checked, mode, real_docking_status)
+
+    if not binding_checked:
+        path_summary = "Binding was not checked because the SMILES could not be parsed."
+    elif mode == "real_docking" and real_docking_status == "executed":
+        path_summary = "Real docking executed successfully against a prepared receptor asset."
+    elif mode == "fallback_proxy" and real_docking_status == "runtime_failed":
+        path_summary = (
+            "Real docking was attempted but failed at runtime, so the module fell back to a structural proxy."
+        )
+    elif mode == "fallback_proxy":
+        path_summary = (
+            "Fallback proxy path was used because the nominal real-docking path is currently blocked "
+            "(not attempted and failed, but confirmed blocked before any run)."
+        )
+    elif mode == "scaffold_proxy":
+        path_summary = (
+            "Scaffold proxy path was used intentionally because no active target-specific real-docking path was available."
+        )
+    else:
+        # binding_checked=True, mode=unavailable: the path ran fully but produced no usable score or proxy.
+        path_summary = (
+            "Binding was checked but no usable score or proxy could be produced. "
+            "This is distinct from 'not checked': the path ran to completion but returned nothing actionable."
+        )
+
+    comparator_summary = (
+        f"Comparator: {comparator_name} scored {_format_score(comparator_score)} and the candidate scored "
+        f"{_format_score(candidate_score)} (delta {_format_delta(delta)})."
+        if comparator_score is not None or candidate_score is not None or delta is not None
+        else f"Comparator: {comparator_name}; no candidate/comparator score pair was available."
+    )
+
+    blocker_summary = ""
+    if mode != "real_docking" and blocking_detail:
+        blocker_summary = f" Real-docking blocker or failure: {blocking_detail}."
+
+    interaction_summary = (
+        " Key interaction residues were returned."
+        if key_interactions_available
+        else " Key interaction residues were not available."
+    )
+
+    provenance = {
+        "binding_checked": binding_checked,
+        "binding_state": binding_state,
+        "binding_mode": mode,
+        "binding_mode_reason": str(binding_result.get("mode_reason", "")),
+        "real_docking_status": real_docking_status,
+        "real_docking_probe": probe,
+        "real_docking_failure": binding_result.get("real_docking_failure"),
+        "receptor_asset_checked": bool(probe.get("receptor_asset_checked", False)),
+        "receptor_asset_available": bool(probe.get("receptor_asset_available", False)),
+        "docking_engine_checked": bool(probe.get("docking_engine_checked", False)),
+        "docking_engine_available": bool(probe.get("docking_engine_available", False)),
+        "comparator_name": comparator_name,
+        "comparator_score": comparator_score,
+        "candidate_score": candidate_score,
+        "delta_vs_reference": delta,
+        "key_interactions_available": key_interactions_available,
+        "evidence_level": evidence_level,
+        "final_binding_reason": final_reason,
+    }
+    provenance["provenance_explanation"] = (
+        f"{path_summary} {comparator_summary} Evidence strength: {evidence_level.replace('_', ' ')}."
+        f"{blocker_summary}{interaction_summary} Final binding interpretation: {final_reason}"
+    )
+    return provenance
+
+
+def build_binding_evidence(binding_result: dict) -> dict:
+    """Expose stable binding evidence fields for validation, API, and reports."""
+    provenance = build_binding_provenance(binding_result)
+    return {
+        "binding_checked": provenance["binding_checked"],
+        "binding_state": provenance["binding_state"],
+        "binding_mode": provenance["binding_mode"],
+        "binding_evidence_level": provenance["evidence_level"],
+        "final_binding_reason": provenance["final_binding_reason"],
+        "binding_provenance": provenance,
+        "binding_provenance_explanation": provenance["provenance_explanation"],
+    }
+
+
+def _format_score(score: Optional[float]) -> str:
+    if score is None:
+        return "N/A"
+    return f"{score:.2f}"
+
+
+def _format_delta(delta: Optional[float]) -> str:
+    if delta is None:
+        return "N/A"
+    return f"{delta:+.2f}"
+
+
 def run_binding_evaluation(
     smiles: str,
     target: str,
@@ -491,12 +665,23 @@ def run_binding_evaluation(
     target_key = _normalize_target_key(target)
     rdkit_ok = _try_load_rdkit()
     notes: List[str] = []
+    invalid_smiles = False
 
     target_info = KNOWN_TARGETS.get(target_key, {})
     reference_name = reference_drug or target_info.get("reference_drug", "unknown")
 
     probe = _build_real_docking_probe(target_key)
-    mode = _detect_mode(target_key, probe)
+    if rdkit_ok and _Chem is not None and _Chem.MolFromSmiles(smiles) is None:
+        invalid_smiles = True
+        probe["status"] = "not_checked_invalid_smiles"
+        blockers = list(probe.get("blockers") or [])
+        if "Input SMILES could not be parsed." not in blockers:
+            blockers.append("Input SMILES could not be parsed.")
+        probe["blockers"] = blockers
+        mode = "unavailable"
+        notes.append("Binding was not checked because the SMILES could not be parsed.")
+    else:
+        mode = _detect_mode(target_key, probe)
     print(f"   [Binding] Mode selected: {mode}")
 
     docking_score: Optional[float] = None
@@ -569,7 +754,9 @@ def run_binding_evaluation(
     if mode == "unavailable":
         confidence = "none"
         data_source = "external_unavailable" if probe.get("target_supported") else "heuristic_proxy"
-        if not rdkit_ok:
+        if invalid_smiles:
+            real_docking_failure = "Invalid SMILES"
+        elif not rdkit_ok:
             notes.append("RDKit is unavailable, so no proxy score could be produced.")
         blockers = probe.get("blockers") or []
         if blockers:
@@ -614,6 +801,7 @@ def run_binding_evaluation(
         "rdkit_available": rdkit_ok,
         "notes": notes,
     }
+    result.update(build_binding_evidence(result))
 
     print(
         f"[TargetEngagement] Done. mode={mode}, score={docking_score}, "

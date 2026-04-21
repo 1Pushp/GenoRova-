@@ -103,17 +103,32 @@ def _try_load_rdkit():
 # Path to persistent molecule database
 DB_PATH = "outputs/genorova_memory.db"
 
-# Known approved diabetes reference drugs (SMILES strings)
-APPROVED_DIABETES_DRUGS = {
-    "metformin":     "CN(C)C(=N)NC(=N)N",
-    "sitagliptin":   "Fc1cc(c(F)cc1F)CC(N)CC(=O)N1CCn2c(nnc2CC1)C(F)(F)F",
-    "empagliflozin": "OC[C@@H]1O[C@@H](c2ccc(Cl)cc2-c2ccc(OCC3CCOCC3)cc2)[C@H](O)[C@@H](O)[C@@H]1O",
-    "glipizide":     "Cc1cnc(CN2C(=O)CCC2=O)s1",
-    "aspirin":       "CC(=O)Oc1ccccc1C(=O)O",
-    "paracetamol":   "CC(=O)Nc1ccc(O)cc1",
-    "ibuprofen":     "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
-    "caffeine":      "Cn1cnc2c1c(=O)n(c(=O)n2C)C",
-}
+# Import the canonical reference drug list from the single source of truth.
+# All novelty exact-match checks in this module use this list so that any
+# update to reference_data.py propagates here automatically.
+import sys as _sys
+from pathlib import Path as _Path
+_scorer_src = _Path(__file__).resolve().parent   # genorova/src/
+if str(_scorer_src) not in _sys.path:
+    _sys.path.insert(0, str(_scorer_src))
+
+try:
+    from validation.reference_data import REFERENCE_DRUGS as _CANONICAL_REFERENCE_DRUGS
+    APPROVED_DIABETES_DRUGS = _CANONICAL_REFERENCE_DRUGS
+except Exception as _e:
+    # Fallback so the scorer still runs if reference_data is unreachable.
+    # This copy will drift — fix the import issue rather than relying on this.
+    print(f"   [scorer] WARNING: could not import reference_data ({_e}). Using local fallback.")
+    APPROVED_DIABETES_DRUGS = {
+        "metformin":     "CN(C)C(=N)NC(=N)N",
+        "sitagliptin":   "Fc1cc(c(F)cc1F)CC(N)CC(=O)N1CCn2c(nnc2CC1)C(F)(F)F",
+        "empagliflozin": "OC[C@@H]1O[C@@H](c2ccc(Cl)cc2-c2ccc(OCC3CCOCC3)cc2)[C@H](O)[C@@H](O)[C@@H]1O",
+        "glipizide":     "Cc1cnc(CN2C(=O)CCC2=O)s1",
+        "aspirin":       "CC(=O)Oc1ccccc1C(=O)O",
+        "paracetamol":   "CC(=O)Nc1ccc(O)cc1",
+        "ibuprofen":     "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+        "caffeine":      "Cn1cnc2c1c(=O)n(c(=O)n2C)C",
+    }
 
 # Lipinski Rule of 5 limits
 LIPINSKI_MW_MAX    = 500
@@ -474,20 +489,27 @@ def calculate_sa_score(smiles):
 
 def is_novel(smiles, db_path=DB_PATH):
     """
-    Check if a molecule is novel (not seen before by Genorova AI).
+    Simple exact-match novelty check used by the legacy scorer pipeline.
 
     Checks two sources:
     1. The persistent Genorova molecule database (SQLite)
-    2. The list of known approved diabetes reference drugs
+    2. The canonical APPROVED_DIABETES_DRUGS list (sourced from reference_data.py)
 
-    Does NOT require RDKit -- uses simple string comparison.
+    NOTE: This is an exact-string check only — it does NOT apply Tanimoto
+    similarity. The full three-layer novelty check (including Tanimoto at
+    TANIMOTO_KNOWN_THRESHOLD) lives in validation/chemistry/sanitizer.check_novelty()
+    and is used by the canonical validation pipeline. Use that function when
+    you need the structured novelty flag ("potentially_novel_patentable",
+    "known_repurposing_lead", "local_only_checked", "unrealistic").
+
+    Does NOT require RDKit — uses simple string comparison.
 
     Args:
         smiles (str): SMILES string to check
         db_path (str): Path to the Genorova SQLite database
 
     Returns:
-        bool: True if the molecule is novel, False if already known
+        bool: True if the molecule is novel (not in approved list or DB), False otherwise
 
     Example:
         >>> is_novel("CN(C)C(=N)NC(=N)N")   # Metformin -- not novel
