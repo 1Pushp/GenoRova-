@@ -40,6 +40,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 import auth_store
+import chat_store
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -70,7 +71,6 @@ FRONTEND_DIST_DIR = ROOT_DIR.parent / "app" / "frontend" / "dist"
 FRONTEND_INDEX_PATH = FRONTEND_DIST_DIR / "index.html"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 
-CHAT_SESSION_MEMORY: dict[str, dict[str, Any]] = {}
 # NOTE: BEST_MOLECULE is intentionally not a hardcoded constant.
 # The "best" molecule is always determined at runtime by the canonical ranking
 # path (validation.ranking) via _best_available_smiles() and api_stats().
@@ -116,6 +116,25 @@ def _default_auth_db_path() -> Path:
 
 
 AUTH_DB_PATH = _default_auth_db_path()
+
+
+def _default_chat_db_path() -> Path:
+    override = (
+        os.getenv("GENOROVA_CHAT_DB_PATH", "").strip()
+        or os.getenv("CHAT_MEMORY_DB_PATH", "").strip()
+    )
+    if override:
+        return Path(override).expanduser()
+
+    if os.name == "nt":
+        localappdata = os.getenv("LOCALAPPDATA", "").strip()
+        if localappdata:
+            return Path(localappdata) / "GenorovaAI" / "chat_memory.db"
+
+    return Path.cwd() / "runtime" / "chat_memory.db"
+
+
+CHAT_DB_PATH = _default_chat_db_path()
 
 
 def _json_log(level: int, event: str, **fields: Any) -> None:
@@ -258,10 +277,15 @@ def _redact_email(email: str | None) -> str | None:
     return f"{masked}@{domain}"
 
 
-def _runtime_warnings(auth_status: dict[str, Any] | None = None) -> list[str]:
+def _runtime_warnings(
+    auth_status: dict[str, Any] | None = None,
+    chat_status: dict[str, Any] | None = None,
+) -> list[str]:
     warnings: list[str] = []
     if auth_status and not auth_status.get("available", False):
         warnings.append("auth_storage_unavailable")
+    if chat_status and not chat_status.get("available", False):
+        warnings.append("chat_storage_unavailable")
     if not _cookie_secure():
         warnings.append("cookie_secure_disabled")
     if not FRONTEND_INDEX_PATH.exists():
@@ -306,15 +330,7 @@ def _molecule_storage_status() -> dict[str, Any]:
 
 
 def _chat_session_status() -> dict[str, Any]:
-    return {
-        "mode": "process_memory",
-        "durability": "ephemeral",
-        "active_session_count": len(CHAT_SESSION_MEMORY),
-        "message": (
-            "Protected chat context in src.api is stored in process memory only and "
-            "does not survive a restart."
-        ),
-    }
+    return chat_store.get_storage_status(CHAT_DB_PATH)
 
 
 def _frontend_status() -> dict[str, Any]:
@@ -341,7 +357,7 @@ def _ops_status_payload() -> dict[str, Any]:
     molecule_status = _molecule_storage_status()
     frontend_status = _frontend_status()
     chat_status = _chat_session_status()
-    warnings = _runtime_warnings(auth_status)
+    warnings = _runtime_warnings(auth_status, chat_status)
     health_state = "degraded" if warnings else "ok"
 
     return {
@@ -351,6 +367,7 @@ def _ops_status_payload() -> dict[str, Any]:
         "startup": {
             **STARTUP_STATE,
             "auth_db_path": str(AUTH_DB_PATH),
+            "chat_db_path": str(CHAT_DB_PATH),
             "cookie_secure": _cookie_secure(),
         },
         "storage": {
@@ -366,8 +383,8 @@ def _ops_status_payload() -> dict[str, Any]:
         "degraded_states": warnings,
         "recommended_actions": [
             "Run scripts/smoke_check.py before deploys.",
-            "Keep a recent backup of auth and molecule storage before demoing.",
-            "Treat chat-session state in src.api as restart-ephemeral.",
+            "Keep a recent backup of auth, chat, and molecule storage before demoing.",
+            "Verify /auth/me and /api/chat/sessions after deploys that touch auth or workspace history.",
         ],
     }
 
@@ -377,15 +394,19 @@ def _initialize_runtime_state() -> None:
     STARTUP_STATE["started_at"] = datetime.now().isoformat()
     try:
         auth_store.init_db(AUTH_DB_PATH)
+        chat_store.init_db(CHAT_DB_PATH)
         auth_status = _auth_storage_status()
-        STARTUP_STATE["initialized"] = bool(auth_status.get("available"))
+        chat_status = _chat_session_status()
+        STARTUP_STATE["initialized"] = bool(auth_status.get("available")) and bool(chat_status.get("available"))
         STARTUP_STATE["last_error"] = None
-        STARTUP_STATE["warnings"] = _runtime_warnings(auth_status)
+        STARTUP_STATE["warnings"] = _runtime_warnings(auth_status, chat_status)
         _json_log(
             logging.INFO,
             "startup_complete",
             auth_db_path=str(AUTH_DB_PATH),
+            chat_db_path=str(CHAT_DB_PATH),
             auth_storage_available=auth_status.get("available"),
+            chat_storage_available=chat_status.get("available"),
             frontend_built=_frontend_is_built(),
             molecule_db_exists=DB_PATH.exists(),
             warnings=STARTUP_STATE["warnings"],
@@ -522,11 +543,23 @@ def _clear_auth_cookie(response: Response) -> None:
     )
 
 
+def _api_key_from_request(request: Request) -> str | None:
+    """Extract a raw API key from the Authorization: Bearer <key> header."""
+    auth_header = request.headers.get("Authorization", "").strip()
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:].strip() or None
+    return None
+
+
 def _current_user_from_request(request: Request) -> dict[str, str] | None:
+    """Resolve the calling user from either a session cookie or an API key header."""
     session_token = request.cookies.get(AUTH_COOKIE_NAME)
-    if not session_token:
-        return None
-    return auth_store.get_user_for_session(AUTH_DB_PATH, session_id=session_token)
+    if session_token:
+        return auth_store.get_user_for_session(AUTH_DB_PATH, session_id=session_token)
+    raw_key = _api_key_from_request(request)
+    if raw_key:
+        return auth_store.get_user_for_api_key(AUTH_DB_PATH, raw_key=raw_key)
+    return None
 
 
 def get_current_user(request: Request) -> dict[str, str]:
@@ -534,6 +567,47 @@ def get_current_user(request: Request) -> dict[str, str]:
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
     return user
+
+
+def _check_rate_limit(user_id: str, endpoint: str = "generate") -> None:
+    """
+    Raise HTTP 429 if the user has exhausted their daily generation quota.
+
+    Quota is determined by plan_overrides; defaults to the free tier (10/day)
+    while billing is deferred.
+    """
+    plan = auth_store.get_plan_for_user(AUTH_DB_PATH, user_id=user_id)
+    limit = auth_store.PLAN_LIMITS.get(plan, auth_store.PLAN_LIMITS[auth_store.DEFAULT_PLAN])
+    used = auth_store.get_daily_usage_count(AUTH_DB_PATH, user_id=user_id, endpoint=endpoint)
+    if used >= limit:
+        _json_log(
+            logging.WARNING,
+            "rate_limit_hit",
+            user_id=user_id,
+            plan=plan,
+            limit=limit,
+            used=used,
+            endpoint=endpoint,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "daily_limit_reached",
+                "message": f"Daily generation limit reached ({used}/{limit}). Resets at midnight UTC.",
+                "plan": plan,
+                "limit": limit,
+                "used": used,
+                "reset": "midnight UTC",
+            },
+        )
+
+
+def _record_usage(user_id: str, endpoint: str = "generate") -> None:
+    """Record a successful generation call for rate-limit accounting."""
+    try:
+        auth_store.record_usage_event(AUTH_DB_PATH, user_id=user_id, endpoint=endpoint)
+    except Exception as exc:
+        _json_log(logging.WARNING, "usage_record_failed", user_id=user_id, error=str(exc))
 
 
 # ── Helper: load scored CSV ──────────────────────────────────────────────────
@@ -1130,26 +1204,65 @@ def _score_smiles_payload(smiles: str) -> dict:
         raise HTTPException(status_code=500, detail=f"Scoring failed: {e}")
 
 
-def _get_or_create_session_id(session_id: str | None) -> str:
-    """Return a stable session identifier for the chat flow."""
+def _get_or_create_session_id(session_id: str | None, current_user: dict[str, str]) -> str:
+    """Return a stable chat-session identifier scoped to the current user."""
     if session_id and session_id.strip():
-        return session_id.strip()
+        candidate = session_id.strip()
+        stored_session = chat_store.get_session(CHAT_DB_PATH, session_id=candidate)
+        if stored_session is None or stored_session.get("user_id") == current_user["id"]:
+            return candidate
     return f"session-{uuid.uuid4().hex}"
 
 
-def _get_session_state(session_id: str, user_id: str) -> dict[str, Any]:
-    """Read in-memory session state for the current deployment instance."""
-    stored = CHAT_SESSION_MEMORY.get(session_id) or {}
-    if stored.get("user_id") != user_id:
-        return {}
-    return dict(stored.get("state") or {})
+def _get_session_state(session_id: str, current_user: dict[str, str]) -> dict[str, Any]:
+    """Load persisted conversation state for the current user and session."""
+    stored_session = chat_store.get_session(
+        CHAT_DB_PATH,
+        session_id=session_id,
+        user_id=current_user["id"],
+    )
+    return dict(stored_session.get("state") or {}) if stored_session else {}
 
 
-def _save_session_state(session_id: str, user_id: str, state: dict[str, Any]) -> None:
-    """Persist lightweight session context in memory for this process."""
-    CHAT_SESSION_MEMORY[session_id] = {
-        "user_id": user_id,
-        "state": dict(state),
+def _session_title_from_message(message: str) -> str:
+    cleaned = " ".join(message.strip().split())
+    if not cleaned:
+        return chat_store.DEFAULT_SESSION_TITLE
+    if len(cleaned) <= 48:
+        return cleaned
+    return f"{cleaned[:45].rstrip()}..."
+
+
+def _workspace_message_from_store(message: dict[str, Any]) -> dict[str, Any]:
+    if message.get("role") == "assistant":
+        payload = dict(message.get("payload") or {})
+        if not payload and message.get("content"):
+            payload = {
+                "summary": message["content"],
+                "message": message["content"],
+            }
+        return {
+            "role": "assistant",
+            "payload": payload,
+            "created_at": message.get("created_at"),
+        }
+    return {
+        "role": "user",
+        "content": message.get("content", ""),
+        "created_at": message.get("created_at"),
+    }
+
+
+def _workspace_session_from_store(session: dict[str, Any]) -> dict[str, Any]:
+    stored_messages = list(session.get("messages") or [])
+    return {
+        "session_id": session["id"],
+        "title": session.get("title") or chat_store.DEFAULT_SESSION_TITLE,
+        "conversation_state": session.get("state") or {},
+        "messages": [_workspace_message_from_store(message) for message in stored_messages],
+        "created_at": session.get("created_at"),
+        "updated_at": session.get("updated_at"),
+        "message_count": len(stored_messages),
     }
 
 
@@ -1157,13 +1270,60 @@ def _merge_state_sources(
     frontend_state: dict[str, Any] | None,
     memory_state: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Merge frontend-provided context with backend in-memory session context."""
+    """Merge frontend-provided context with persisted backend session context."""
     merged: dict[str, Any] = {}
     if memory_state:
         merged.update(memory_state)
     if frontend_state:
         merged.update(frontend_state)
     return merged
+
+
+def _persist_chat_response(
+    *,
+    session_id: str,
+    current_user: dict[str, str],
+    user_message: str,
+    response: dict[str, Any],
+) -> None:
+    session_title = _session_title_from_message(user_message)
+    conversation_state = dict(response.get("conversation_state") or {})
+    chat_store.ensure_session(
+        CHAT_DB_PATH,
+        session_id=session_id,
+        user=current_user,
+        title=session_title,
+        state=conversation_state,
+        metadata={"latest_intent": response.get("intent"), "latest_mode": response.get("mode")},
+    )
+    chat_store.add_message(
+        CHAT_DB_PATH,
+        session_id=session_id,
+        user=current_user,
+        role="user",
+        content=user_message,
+        metadata={"kind": "prompt"},
+        title=session_title,
+    )
+    assistant_summary = str(response.get("summary") or response.get("message") or "Response ready.")
+    chat_store.add_message(
+        CHAT_DB_PATH,
+        session_id=session_id,
+        user=current_user,
+        role="assistant",
+        content=assistant_summary,
+        payload=response,
+        metadata={"kind": "response"},
+        title=session_title,
+    )
+    chat_store.update_session_state(
+        CHAT_DB_PATH,
+        session_id=session_id,
+        user=current_user,
+        state=conversation_state,
+        title=session_title,
+        metadata={"latest_intent": response.get("intent"), "latest_mode": response.get("mode")},
+    )
 
 
 def _molecule_svg(smiles: str | None, width: int = 360, height: int = 220) -> str | None:
@@ -1285,11 +1445,103 @@ def auth_me(current_user: dict[str, str] = Depends(get_current_user)):
     return {"user": current_user}
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+@app.post("/auth/forgot-password", summary="Request a manual password reset")
+def auth_forgot_password(req: ForgotPasswordRequest):
+    try:
+        record = auth_store.create_password_reset_request(AUTH_DB_PATH, email=req.email)
+        _json_log(
+            logging.INFO,
+            "password_reset_requested",
+            email=record["email"],
+            request_id=record["id"],
+            support_queue_id=record["support_queue_id"],
+            support_target_email=record["support_target_email"],
+        )
+    except auth_store.AuthStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        _json_log(logging.WARNING, "password_reset_request_failed", error=str(exc))
+        raise HTTPException(status_code=500, detail="Unable to record reset request.") from exc
+    return {
+        "success": True,
+        "ui_message": "Password reset request received. Manual reset flow is temporary.",
+        "message": (
+            "Password reset request received. "
+            "Manual reset flow is temporary — our team at pushpdwivedi911@gmail.com "
+            "will follow up within 24 hours."
+        ),
+        "request_id": record["id"],
+        "support_queue_id": record["support_queue_id"],
+        "support_target_email": record["support_target_email"],
+    }
+
+
+# ── API KEY MANAGEMENT ENDPOINTS ─────────────────────────────────────────────
+
+class CreateKeyRequest(BaseModel):
+    name: str = "My API Key"
+
+
+@app.post("/api/keys/create", summary="Create a new API key")
+def api_keys_create(
+    req: CreateKeyRequest,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    result = auth_store.create_api_key(AUTH_DB_PATH, user_id=current_user["id"], name=req.name)
+    _json_log(
+        logging.INFO,
+        "api_key_created",
+        user_id=current_user["id"],
+        key_id=result["id"],
+        key_prefix=result["key_prefix"],
+    )
+    return result
+
+
+@app.get("/api/keys/list", summary="List active API keys for the current user")
+def api_keys_list(current_user: dict[str, str] = Depends(get_current_user)):
+    keys = auth_store.list_api_keys(AUTH_DB_PATH, user_id=current_user["id"])
+    return {"keys": keys}
+
+
+@app.delete("/api/keys/{key_id}", summary="Revoke an API key")
+def api_keys_revoke(
+    key_id: str,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    revoked = auth_store.revoke_api_key(AUTH_DB_PATH, key_id=key_id, user_id=current_user["id"])
+    if not revoked:
+        raise HTTPException(status_code=404, detail="API key not found or already revoked.")
+    _json_log(logging.INFO, "api_key_revoked", user_id=current_user["id"], key_id=key_id)
+    return {"success": True, "key_id": key_id}
+
+
+@app.get("/api/usage", summary="Return the current user's daily usage and quota")
+def api_usage(current_user: dict[str, str] = Depends(get_current_user)):
+    user_id = current_user["id"]
+    plan = auth_store.get_plan_for_user(AUTH_DB_PATH, user_id=user_id)
+    limit = auth_store.PLAN_LIMITS.get(plan, auth_store.PLAN_LIMITS[auth_store.DEFAULT_PLAN])
+    used = auth_store.get_daily_usage_count(AUTH_DB_PATH, user_id=user_id, endpoint="generate")
+    return {
+        "plan": plan,
+        "limit": limit,
+        "used_today": used,
+        "remaining": max(0, limit - used),
+        "reset": "midnight UTC",
+        "billing_note": "Billing is deferred. All accounts default to the free access tier unless manually upgraded.",
+    }
+
+
 def _readiness_payload() -> tuple[bool, dict[str, Any]]:
     ops_status = _ops_status_payload()
     checks = {
         "startup_initialized": bool(STARTUP_STATE.get("initialized")),
         "auth_storage_available": bool(ops_status["storage"]["auth"]["available"]),
+        "chat_storage_available": bool(ops_status["storage"]["chat_session"]["available"]),
         "frontend_built": bool(ops_status["storage"]["frontend"]["built"]),
         "cookie_secure": bool(_cookie_secure()),
     }
@@ -1389,7 +1641,7 @@ def ops_status():
 # ── ENDPOINT: POST /generate ──────────────────────────────────────────────────
 
 @app.post("/generate", summary="Return ranked computational molecule results")
-def generate(req: GenerateRequest):
+def generate(req: GenerateRequest, request: Request):
     """
     Return ranked computational molecule results for a target disease.
 
@@ -1400,6 +1652,10 @@ def generate(req: GenerateRequest):
     - **disease**: "diabetes" or "infection"
     - **count**: number of molecules to return (max 200)
     """
+    user = _current_user_from_request(request)
+    if user:
+        _check_rate_limit(user["id"])
+
     payload = _generate_candidates_for_disease(req.disease, req.count)
     trust = payload.get("trust", {})
     if trust.get("fallback_used") or payload.get("count_returned", 0) == 0:
@@ -1412,13 +1668,17 @@ def generate(req: GenerateRequest):
             result_source=trust.get("result_source"),
             returned=payload.get("count_returned", 0),
         )
+
+    if user:
+        _record_usage(user["id"])
+
     return _public_generation_payload(payload)
 
 
 @app.post("/api/generate", summary="Return ranked computational molecules (SaaS API)")
-def api_generate(req: GenerateRequest):
+def api_generate(req: GenerateRequest, request: Request):
     """Alias route for the SaaS frontend deployed against src.api:app."""
-    return generate(req)
+    return generate(req, request)
 
 
 # ── ENDPOINT: POST /score ─────────────────────────────────────────────────────
@@ -1577,6 +1837,35 @@ def api_stats():
     }
 
 
+@app.get("/api/chat/sessions", summary="List saved chat sessions for the authenticated user")
+def api_chat_sessions(
+    limit: int = 20,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    bounded_limit = max(1, min(limit, 50))
+    sessions = chat_store.list_sessions(
+        CHAT_DB_PATH,
+        user_id=current_user["id"],
+        limit=bounded_limit,
+    )
+    return {"sessions": sessions}
+
+
+@app.get("/api/chat/sessions/{session_id}", summary="Load a saved chat session for the authenticated user")
+def api_chat_session_detail(
+    session_id: str,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    session = chat_store.get_session_with_messages(
+        CHAT_DB_PATH,
+        session_id=session_id,
+        user_id=current_user["id"],
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+    return {"session": _workspace_session_from_store(session)}
+
+
 @app.post("/api/chat", summary="Natural-language Genorova chat endpoint")
 def api_chat(
     req: ChatRequest,
@@ -1587,10 +1876,10 @@ def api_chat(
     if not message:
         raise HTTPException(status_code=422, detail="Message cannot be empty.")
 
-    session_id = _get_or_create_session_id(req.session_id)
+    session_id = _get_or_create_session_id(req.session_id, current_user)
     merged_state = _merge_state_sources(
         req.conversation_state,
-        _get_session_state(session_id, current_user["id"]),
+        _get_session_state(session_id, current_user),
     )
     mode = _resolve_mode_from_message(message, _normalize_mode(req.mode), merged_state)
     intent = _parse_chat_intent(message)
@@ -1623,10 +1912,11 @@ def api_chat(
     response["session_id"] = session_id
     response["history_window"] = req.history[-6:]
     response["generated_at"] = datetime.now().isoformat()
-    _save_session_state(
-        session_id,
-        current_user["id"],
-        response.get("conversation_state", merged_state),
+    _persist_chat_response(
+        session_id=session_id,
+        current_user=current_user,
+        user_message=message,
+        response=response,
     )
     return response
 

@@ -4,7 +4,6 @@ import { useAuth } from "./auth";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 const BACKEND_ORIGIN = API_BASE_URL || "http://localhost:8000";
 const API_PREFIX = API_BASE_URL ? `${API_BASE_URL}/api` : "/api";
-const STORAGE_KEY = "genorova-chat-v11-session";
 
 const defaultStats = {
   total_molecules: 0,
@@ -118,36 +117,6 @@ function createSessionId() {
     return `session-${crypto.randomUUID()}`;
   }
   return `session-${Date.now()}`;
-}
-
-function loadStoredSession() {
-  try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return {
-        sessionId: createSessionId(),
-        messages: [],
-        conversationState: {},
-      };
-    }
-
-    const parsed = JSON.parse(raw);
-    return {
-      sessionId: parsed.sessionId || createSessionId(),
-      messages: Array.isArray(parsed.messages) ? parsed.messages : [],
-      conversationState: parsed.conversationState || {},
-    };
-  } catch {
-    return {
-      sessionId: createSessionId(),
-      messages: [],
-      conversationState: {},
-    };
-  }
-}
-
-function clearStoredSession() {
-  window.sessionStorage.removeItem(STORAGE_KEY);
 }
 
 async function readJson(response) {
@@ -370,6 +339,18 @@ function formatLabel(value) {
   return String(value || "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatSessionTimestamp(value) {
+  if (!value) return "Saved recently";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Saved recently";
+  return parsed.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function recommendationTone(recommendation) {
@@ -718,8 +699,8 @@ function WorkspaceStatusGrid({ stats, hasMessages }) {
       title: "Conversations",
       value: hasMessages ? "Active" : "None yet",
       description: hasMessages
-        ? "This workspace already has a live conversation thread."
-        : "Run the recommended first demo to create the first conversation in this session.",
+        ? "This workspace already has a saved conversation thread linked to the signed-in account."
+        : "Run the recommended first demo to create the first saved conversation for this account.",
     },
     {
       title: "Candidate Results",
@@ -730,15 +711,15 @@ function WorkspaceStatusGrid({ stats, hasMessages }) {
     },
     {
       title: "Reports / History",
-      value: "Empty",
+      value: hasMessages ? "Available" : "Empty",
       description:
-        "No report export or persistent history is shown in this workspace yet. Review the validation ledger inside each result first.",
+        "Workspace history now reloads from the authenticated account after refresh or sign-in. Review the validation ledger inside each result first.",
     },
     {
       title: "Usage Trail",
-      value: hasMessages ? "Session-only" : "No activity yet",
+      value: hasMessages ? "Saved" : "No activity yet",
       description:
-        "Workspace history begins after the first prompt and is currently tied to the active signed-in browser session.",
+        "Workspace history begins after the first prompt and is saved to the signed-in account rather than browser-only storage.",
     },
     {
       title: "Ranked Molecule",
@@ -762,6 +743,212 @@ function WorkspaceStatusGrid({ stats, hasMessages }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function ApiKeysPanel({ userId }) {
+  const [open, setOpen] = useState(false);
+  const [keys, setKeys] = useState([]);
+  const [usage, setUsage] = useState(null);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [freshKey, setFreshKey] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+
+  async function loadData() {
+    setLoadError(null);
+    try {
+      const [keysRes, usageRes] = await Promise.all([
+        fetch(`${API_PREFIX}/keys/list`, { credentials: "include" }),
+        fetch(`${API_PREFIX}/usage`, { credentials: "include" }),
+      ]);
+      if (keysRes.ok) setKeys((await keysRes.json()).keys || []);
+      if (usageRes.ok) setUsage(await usageRes.json());
+    } catch {
+      setLoadError("Could not load API access data.");
+    }
+  }
+
+  useEffect(() => {
+    if (open) loadData();
+  }, [open]);
+
+  async function handleCreate() {
+    if (creating) return;
+    setCreating(true);
+    setFreshKey(null);
+    try {
+      const res = await fetch(`${API_PREFIX}/keys/create`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newKeyName.trim() || "API Key" }),
+      });
+      if (!res.ok) throw new Error("Failed to create key");
+      const data = await res.json();
+      setFreshKey(data);
+      setNewKeyName("");
+      await loadData();
+    } catch {
+      setLoadError("Could not create API key.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleRevoke(keyId) {
+    try {
+      const res = await fetch(`${API_PREFIX}/keys/${keyId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to revoke key");
+      setKeys((prev) => prev.filter((k) => k.id !== keyId));
+      if (freshKey?.id === keyId) setFreshKey(null);
+    } catch {
+      setLoadError("Could not revoke API key.");
+    }
+  }
+
+  const quotaPercent = usage ? Math.min(100, Math.round((usage.used_today / usage.limit) * 100)) : 0;
+
+  return (
+    <div className="mt-6">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between text-xs font-bold uppercase tracking-[0.24em] text-slate-400 transition hover:text-slate-200"
+      >
+        <span>API Access</span>
+        <span className="text-[10px]">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-4">
+          {usage && (
+            <div className="rounded-[18px] border border-white/10 bg-white/5 p-4">
+              <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Daily Usage</div>
+              <div className="mt-2 text-sm text-slate-200">
+                {usage.used_today} / {usage.limit} generations
+              </div>
+              <div className="mt-2 h-1.5 w-full rounded-full bg-white/10">
+                <div
+                  className={`h-1.5 rounded-full transition-all ${quotaPercent >= 90 ? "bg-rose-400" : "bg-teal-400"}`}
+                  style={{ width: `${quotaPercent}%` }}
+                />
+              </div>
+              <div className="mt-2 text-[11px] text-slate-500">
+                Current default research-support access tier &bull; Resets midnight UTC
+              </div>
+            </div>
+          )}
+
+          {freshKey && (
+            <div className="rounded-[18px] border border-teal-500/40 bg-teal-900/20 p-4">
+              <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-teal-300">New Key — Copy Now</div>
+              <div className="mt-2 break-all font-mono text-xs text-teal-100">{freshKey.key}</div>
+              <div className="mt-2 text-[11px] text-slate-400">This key will not be shown again.</div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Active Keys</div>
+            {loadError && (
+              <div className="text-xs text-rose-400">{loadError}</div>
+            )}
+            {keys.length === 0 ? (
+              <div className="rounded-[16px] border border-dashed border-slate-700 px-4 py-3 text-xs text-slate-500">
+                No active API keys.
+              </div>
+            ) : (
+              keys.map((k) => (
+                <div
+                  key={k.id}
+                  className="flex items-center justify-between gap-3 rounded-[16px] border border-slate-700 bg-white/5 px-4 py-3"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-slate-200">{k.name}</div>
+                    <div className="mt-1 font-mono text-[11px] text-slate-500">{k.key_prefix}••••</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRevoke(k.id)}
+                    className="shrink-0 rounded-full border border-rose-700/50 px-3 py-1 text-[11px] font-semibold text-rose-400 transition hover:border-rose-400 hover:text-rose-300"
+                  >
+                    Revoke
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              placeholder="Key name (optional)"
+              className="flex-1 rounded-full border border-slate-700 bg-white/5 px-4 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-teal-500"
+            />
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={creating}
+              className="shrink-0 rounded-full border border-slate-600 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-teal-400 hover:text-white disabled:opacity-50"
+            >
+              {creating ? "Creating…" : "Create"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SavedSessionsPanel({ sessions, activeSessionId, loading, onSelect }) {
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Recent Chats</div>
+        {loading ? <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Syncing</div> : null}
+      </div>
+      <div className="mt-4 space-y-2">
+        {sessions.length === 0 ? (
+          <div className="rounded-[20px] border border-dashed border-slate-700 px-4 py-4 text-sm leading-6 text-slate-400">
+            Saved chat history will appear here after the first prompt.
+          </div>
+        ) : (
+          sessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+            return (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => onSelect(session.id)}
+                className={`w-full rounded-[20px] border px-4 py-3 text-left transition ${
+                  isActive
+                    ? "border-teal-400 bg-teal-400/10 text-white"
+                    : "border-slate-700 bg-white/5 text-slate-200 hover:border-teal-400 hover:bg-teal-400/10"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="truncate text-sm font-semibold">{session.title || "New Chat"}</div>
+                  <div className="shrink-0 text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                    {formatSessionTimestamp(session.updated_at)}
+                  </div>
+                </div>
+                <div className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">
+                  {session.message_count || 0} messages
+                </div>
+                <div className="mt-2 text-sm leading-6 text-slate-300">
+                  {session.last_message_preview || "Open this chat to continue the saved thread."}
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1698,6 +1885,12 @@ function AuthGate({
   onModeChange,
   onValueChange,
   onSubmit,
+  forgotState,
+  forgotEmail,
+  forgotMessage,
+  onForgotEmailChange,
+  onForgotSubmit,
+  onForgotDismiss,
 }) {
   const trustNote = stats?.trust_note || defaultStats.trust_note;
   const isSignup = authMode === "signup";
@@ -1823,6 +2016,54 @@ function AuthGate({
                 {submitting ? "Working..." : isSignup ? "Create account" : "Sign in"}
               </button>
             </form>
+
+            {!isSignup && forgotState === null && (
+              <details className="mt-4 group">
+                <summary className="cursor-pointer text-center text-xs text-slate-400 underline underline-offset-2 hover:text-slate-700 list-none">
+                  Forgot password?
+                </summary>
+                <form onSubmit={onForgotSubmit} className="mt-3 space-y-3">
+                  <input
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => onForgotEmailChange(e.target.value)}
+                    placeholder="Enter your account email"
+                    required
+                    className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full rounded-full bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-200"
+                  >
+                    Request reset
+                  </button>
+                </form>
+              </details>
+            )}
+
+            {!isSignup && forgotState === "pending" && (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Sending request…
+              </div>
+            )}
+
+            {!isSignup && forgotState === "sent" && (
+              <div className="mt-4 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm leading-6 text-teal-900">
+                {forgotMessage} Requests are routed to pushpdwivedi911@gmail.com for manual follow-up.{" "}
+                <button type="button" onClick={onForgotDismiss} className="underline">
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {!isSignup && forgotState === "error" && (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-900">
+                Could not submit reset request. Please try again or contact support.{" "}
+                <button type="button" onClick={onForgotDismiss} className="underline">
+                  Dismiss
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1831,7 +2072,7 @@ function AuthGate({
 }
 
 export default function GenorovaChatAppV11() {
-  const { user, loading: authLoading, login, logout, signup, bootstrapError } = useAuth();
+  const { user, loading: authLoading, login, logout, signup, forgotPassword, bootstrapError } = useAuth();
   const [stats, setStats] = useState(defaultStats);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -1849,6 +2090,11 @@ export default function GenorovaChatAppV11() {
   });
   const [authError, setAuthError] = useState(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [forgotState, setForgotState] = useState(null); // null | "pending" | "sent" | "error"
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotMessage, setForgotMessage] = useState("Password reset request received. Manual reset flow is temporary.");
+  const [savedSessions, setSavedSessions] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const endRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -1861,38 +2107,88 @@ export default function GenorovaChatAppV11() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, workspaceReady]);
 
-  useEffect(() => {
-    if (!user) {
-      clearStoredSession();
-      setMessages([]);
-      setConversationState({});
-      setSessionId(createSessionId());
-      setInput("");
-      setError(null);
-      setWorkspaceReady(false);
-      return;
-    }
-
-    const restored = loadStoredSession();
-    setMessages(restored.messages);
-    setConversationState(restored.conversationState);
-    setSessionId(restored.sessionId || createSessionId());
+  function clearWorkspace(nextSessionId = createSessionId()) {
+    setMessages([]);
+    setConversationState({});
+    setSessionId(nextSessionId);
     setInput("");
     setError(null);
-    setWorkspaceReady(true);
-  }, [user]);
+  }
+
+  function applySavedSession(session) {
+    if (!session) {
+      clearWorkspace(createSessionId());
+      return;
+    }
+    setMessages(Array.isArray(session.messages) ? session.messages : []);
+    setConversationState(session.conversation_state || {});
+    setSessionId(session.session_id || createSessionId());
+    setError(null);
+  }
+
+  async function fetchSavedSessions() {
+    if (!user) {
+      setSavedSessions([]);
+      return [];
+    }
+    const payload = await apiRequest("/chat/sessions", { method: "GET" });
+    const nextSessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+    setSavedSessions(nextSessions);
+    return nextSessions;
+  }
+
+  async function loadSavedSession(targetSessionId) {
+    const payload = await apiRequest(`/chat/sessions/${encodeURIComponent(targetSessionId)}`, { method: "GET" });
+    const session = payload.session || null;
+    applySavedSession(session);
+    return session;
+  }
 
   useEffect(() => {
-    if (!user || !workspaceReady) return;
-    window.sessionStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        sessionId,
-        messages,
-        conversationState,
-      })
-    );
-  }, [user, workspaceReady, sessionId, messages, conversationState]);
+    let active = true;
+
+    async function bootstrapWorkspace() {
+      if (!user) {
+        setSavedSessions([]);
+        clearWorkspace(createSessionId());
+        setWorkspaceReady(false);
+        setHistoryLoading(false);
+        return;
+      }
+
+      setWorkspaceReady(false);
+      setHistoryLoading(true);
+      setError(null);
+      setInput("");
+
+      try {
+        const sessions = await fetchSavedSessions();
+        if (!active) return;
+
+        if (sessions.length > 0) {
+          await loadSavedSession(sessions[0].id);
+        } else {
+          clearWorkspace(createSessionId());
+        }
+      } catch (requestError) {
+        if (!active) return;
+        setSavedSessions([]);
+        clearWorkspace(createSessionId());
+        setError(describeWorkspaceIssue(requestError));
+      } finally {
+        if (active) {
+          setHistoryLoading(false);
+          setWorkspaceReady(true);
+        }
+      }
+    }
+
+    bootstrapWorkspace();
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   async function loadStats() {
     try {
@@ -1931,15 +2227,19 @@ export default function GenorovaChatAppV11() {
         setMessages((current) => [...current, { role: "assistant", payload }]);
       });
       setConversationState(payload.conversation_state || {});
-      setSessionId(payload.session_id || sessionId);
+      const resolvedSessionId = payload.session_id || sessionId;
+      setSessionId(resolvedSessionId);
+      try {
+        await fetchSavedSessions();
+      } catch {
+        // Keep the active thread usable even if the sidebar refresh fails.
+      }
     } catch (requestError) {
       if (requestError.status === 401) {
         setAuthMode("login");
         setAuthError(describeAuthIssue(requestError, "login"));
-        clearStoredSession();
-        setMessages([]);
-        setConversationState({});
-        setSessionId(createSessionId());
+        setSavedSessions([]);
+        clearWorkspace(createSessionId());
         setWorkspaceReady(false);
         await logout();
         return;
@@ -1965,15 +2265,7 @@ export default function GenorovaChatAppV11() {
 
   function resetConversation() {
     const nextSessionId = createSessionId();
-    setSessionId(nextSessionId);
-    setMessages([]);
-    setConversationState({});
-    setError(null);
-    setInput("");
-    window.sessionStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ sessionId: nextSessionId, messages: [], conversationState: {} })
-    );
+    clearWorkspace(nextSessionId);
   }
 
   function handleAuthValueChange(field, value) {
@@ -2003,12 +2295,7 @@ export default function GenorovaChatAppV11() {
         });
       }
 
-      clearStoredSession();
-      setMessages([]);
-      setConversationState({});
-      setSessionId(createSessionId());
-      setInput("");
-      setError(null);
+      clearWorkspace(createSessionId());
       setAuthValues({ name: "", email: "", password: "" });
     } catch (requestError) {
       setAuthError(describeAuthIssue(requestError, authMode));
@@ -2017,13 +2304,39 @@ export default function GenorovaChatAppV11() {
     }
   }
 
-  async function handleLogout() {
-    clearStoredSession();
-    setMessages([]);
-    setConversationState({});
-    setSessionId(createSessionId());
-    setInput("");
+  async function handleForgotPassword(event) {
+    event.preventDefault();
+    setForgotState("pending");
+    try {
+      const payload = await forgotPassword(forgotEmail);
+      setForgotMessage(payload.ui_message || payload.message || "Password reset request received. Manual reset flow is temporary.");
+      setForgotState("sent");
+    } catch {
+      setForgotState("error");
+    }
+  }
+
+  async function handleSavedSessionSelect(targetSessionId) {
+    if (!targetSessionId || targetSessionId === sessionId) {
+      return;
+    }
+
+    setHistoryLoading(true);
     setError(null);
+
+    try {
+      await loadSavedSession(targetSessionId);
+    } catch (requestError) {
+      setError(describeWorkspaceIssue(requestError));
+    } finally {
+      setHistoryLoading(false);
+      textareaRef.current?.focus();
+    }
+  }
+
+  async function handleLogout() {
+    setSavedSessions([]);
+    clearWorkspace(createSessionId());
     setWorkspaceReady(false);
 
     try {
@@ -2036,7 +2349,7 @@ export default function GenorovaChatAppV11() {
   const showEmptyState = messages.length === 0;
   const systemNotice = bootstrapError ? describeAuthIssue(bootstrapError, authMode) : null;
 
-  if (authLoading) {
+  if (authLoading || (user && !workspaceReady)) {
     return <LoadingGate />;
   }
 
@@ -2055,6 +2368,12 @@ export default function GenorovaChatAppV11() {
           onModeChange={handleAuthModeChange}
           onValueChange={handleAuthValueChange}
           onSubmit={handleAuthSubmit}
+          forgotState={forgotState}
+          forgotEmail={forgotEmail}
+          forgotMessage={forgotMessage}
+          onForgotEmailChange={setForgotEmail}
+          onForgotSubmit={handleForgotPassword}
+          onForgotDismiss={() => { setForgotState(null); setForgotEmail(""); }}
         />
       }
     >
@@ -2131,6 +2450,15 @@ export default function GenorovaChatAppV11() {
                 ))}
               </div>
             </div>
+
+            <SavedSessionsPanel
+              sessions={savedSessions}
+              activeSessionId={sessionId}
+              loading={historyLoading}
+              onSelect={handleSavedSessionSelect}
+            />
+
+            <ApiKeysPanel userId={user?.id} />
           </aside>
 
           <main className="flex min-h-screen flex-1 flex-col">
@@ -2139,7 +2467,7 @@ export default function GenorovaChatAppV11() {
                 <div>
                   <div className="text-xs font-bold uppercase tracking-[0.28em] text-teal-700">Genorova Workspace</div>
                   <div className="mt-2 text-2xl font-semibold text-slate-900">
-                    Evidence-weighted molecule analysis with session memory and explicit trust boundaries
+                    Evidence-weighted molecule analysis with persistent workspace history and explicit trust boundaries
                   </div>
                 </div>
                 <div className="inline-flex rounded-full border border-slate-200 bg-slate-100 p-1">
