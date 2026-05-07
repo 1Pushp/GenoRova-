@@ -1,0 +1,15 @@
+{
+  "generated_total": 2000,
+  "valid_count": 1359,
+  "validity_rate": 0.6795,
+  "unique_scaffolds_generated": 789,
+  "training_scaffolds": 4264,
+  "novel_scaffold_rate": 0.5551,
+  "scaffold_diversity_ratio": 0.5806,
+  "exact_copies": 269,
+  "memorization_rate": 0.2321,
+  "mean_max_tanimoto": 0.7056,
+  "median_max_tanimoto": 0.6948,
+  "near_copy_rate": 0.295,
+  "umap_saved": "genorova/outputs/figures/chemical_space_umap.png"
+}
