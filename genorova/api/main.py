@@ -1,16 +1,5 @@
-import sys
+import sys, torch, os, time, logging, json
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / 'genorova' / 'src'))
-sys.path.insert(0, str(ROOT / 'genorova'))
-
-# Download checkpoint before loading model
-from genorova.api.startup import download_checkpoint_if_missing, check_required_files
-download_checkpoint_if_missing()
-check_required_files()
-
-import torch, os, time, logging, json
 from typing import Optional, List
 
 from rdkit import Chem, RDLogger
@@ -20,13 +9,17 @@ from train_cvae import CVAETokenizer
 from models.cvae import CVAE
 from admet.scorer import score_batch as _score_batch, score_smiles as _score_smiles
 
+GENOROVA_DIR = Path(__file__).resolve().parent.parent
+
 # ── Load model once at startup ────────────────────────────────
-CKPT_PATH = ROOT / 'genorova/outputs/checkpoints/best.pt'
+CKPT_PATH = GENOROVA_DIR / "outputs" / "checkpoints" / "best.pt"
 ckpt  = torch.load(CKPT_PATH, weights_only=False, map_location='cpu')
 cfg   = ckpt['config']
 
-TOK = CVAETokenizer(ROOT / 'genorova/tokenizer/genorova_bpe.json',
-                    max_len=cfg['max_seq_len'])
+TOK = CVAETokenizer(
+    GENOROVA_DIR / "tokenizer" / "genorova_bpe.json",
+    max_len=cfg['max_seq_len'],
+)
 MODEL = CVAE(vocab_size=cfg['vocab_size'], latent_dim=cfg['latent_dim'],
              d_model=cfg['d_model'], num_heads=cfg['num_heads'],
              num_layers=cfg['num_layers'])
@@ -38,7 +31,7 @@ MODEL_VAL_LOSS = ckpt['val_loss']
 MAX_LEN = cfg['max_seq_len']
 
 # ── Logging ───────────────────────────────────────────────────
-LOG_DIR = ROOT / 'genorova/outputs/logs'
+LOG_DIR = GENOROVA_DIR / "outputs" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     filename=str(LOG_DIR / 'api.log'),
@@ -189,8 +182,8 @@ def health():
 def metrics():
     out = {}
     for name, path in [
-        ("novelty",  ROOT / "genorova/outputs/NOVELTY_PROOF_REPORT.json"),
-        ("moses",    ROOT / "genorova/benchmarks/moses_results.json"),
+        ("novelty",  GENOROVA_DIR / "outputs" / "NOVELTY_PROOF_REPORT.json"),
+        ("moses",    GENOROVA_DIR / "benchmarks" / "moses_results.json"),
     ]:
         if path.exists():
             out[name] = json.loads(path.read_text(encoding="utf-8"))
