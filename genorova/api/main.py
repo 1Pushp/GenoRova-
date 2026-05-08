@@ -28,10 +28,19 @@ def _get_model():
     CKPT_PATH = GENOROVA_DIR / "outputs" / "checkpoints" / "best.pt"
     TOK_PATH = GENOROVA_DIR / "tokenizer" / "genorova_bpe.json"
 
+    # Try downloading if missing
+    if not CKPT_PATH.exists():
+        print("[MODEL] Checkpoint missing - attempting download...")
+        try:
+            from genorova.api.startup import download_checkpoint_if_missing
+
+            download_checkpoint_if_missing()
+        except Exception as e:
+            print(f"[MODEL] Download attempt failed: {e}")
+
     if not CKPT_PATH.exists():
         raise FileNotFoundError(
-            f"Checkpoint not found: {CKPT_PATH}. "
-            "Run startup download or upload best.pt manually."
+            f"Checkpoint not found: {CKPT_PATH}"
         )
 
     ckpt = torch.load(str(CKPT_PATH), weights_only=False, map_location='cpu')
@@ -230,16 +239,25 @@ def metrics():
 @app.post("/generate", response_model=List[MoleculeResult], tags=["Generation"])
 def generate(req: GenerateRequest, _=Depends(require_key)):
     t0 = time.time()
-    logging.info(f"POST /generate target={req.target} n={req.n_molecules}")
+    logging.info(f"POST /generate n={req.n_molecules}")
 
-    smiles_list = _generate(req.n_molecules, req.temperature)
+    try:
+        smiles_list = _generate(req.n_molecules, req.temperature)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503,
+            detail=f"Model not loaded: checkpoint missing. {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500,
+            detail=f"Generation error: {str(e)}")
+
     if not smiles_list:
         raise HTTPException(status_code=500,
             detail="Generation failed — model produced no valid SMILES")
 
     df = _score_batch(smiles_list)
 
-    df = df[df['MW']  <= req.mw_max]
+    mw_col = 'mol_weight' if 'mol_weight' in df.columns else 'MW'
+    df = df[df[mw_col] <= req.mw_max]
     df = df[df['QED'] >= req.qed_min]
     df = df.sort_values('composite_score', ascending=False).reset_index(drop=True)
 
@@ -249,7 +267,7 @@ def generate(req: GenerateRequest, _=Depends(require_key)):
             rank=i + 1,
             smiles=str(row['smiles']),
             qed=round(float(row['QED']), 4),
-            mw=round(float(row['MW']), 2),
+            mw=round(float(row[mw_col]), 2),
             logp=round(float(row['LogP']), 3),
             sa_score=round(float(row['SA_Score']), 3),
             composite_score=round(float(row['composite_score']), 2),
@@ -257,8 +275,6 @@ def generate(req: GenerateRequest, _=Depends(require_key)):
             lipinski_pass=bool(row['lipinski_pass'])
         ))
 
-    elapsed = time.time() - t0
-    logging.info(f"POST /generate done: {len(results)} results in {elapsed:.1f}s")
     return results
 
 @app.post("/score", tags=["Scoring"])
