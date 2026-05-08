@@ -19,6 +19,12 @@ except Exception as e:
     print(f"[STARTUP] Warning: {e}")
 
 # Import and expose app
-from genorova.api.main import app  # noqa: E402
+from genorova.api import main as api_main  # noqa: E402
+
+app = api_main.app
+
+
+def __getattr__(name):
+    return getattr(api_main, name)
 
 __all__ = ["app"]

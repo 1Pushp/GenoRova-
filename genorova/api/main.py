@@ -11,24 +11,49 @@ from admet.scorer import score_batch as _score_batch, score_smiles as _score_smi
 
 GENOROVA_DIR = Path(__file__).resolve().parent.parent
 
-# ── Load model once at startup ────────────────────────────────
-CKPT_PATH = GENOROVA_DIR / "outputs" / "checkpoints" / "best.pt"
-ckpt  = torch.load(CKPT_PATH, weights_only=False, map_location='cpu')
-cfg   = ckpt['config']
+# Model state (loaded on first use)
+_model = None
+_tok = None
+_cfg = None
+MODEL_EPOCH = 19
+MODEL_VAL_LOSS = 0.9786
+MAX_LEN = 128
 
-TOK = CVAETokenizer(
-    GENOROVA_DIR / "tokenizer" / "genorova_bpe.json",
-    max_len=cfg['max_seq_len'],
-)
-MODEL = CVAE(vocab_size=cfg['vocab_size'], latent_dim=cfg['latent_dim'],
-             d_model=cfg['d_model'], num_heads=cfg['num_heads'],
-             num_layers=cfg['num_layers'])
-MODEL.load_state_dict(ckpt['model_state'])
-MODEL.eval()
 
-MODEL_EPOCH    = ckpt['epoch']
-MODEL_VAL_LOSS = ckpt['val_loss']
-MAX_LEN = cfg['max_seq_len']
+def _get_model():
+    global _model, _tok, _cfg, MODEL_EPOCH, MODEL_VAL_LOSS, MAX_LEN
+    if _model is not None:
+        return _model, _tok
+
+    CKPT_PATH = GENOROVA_DIR / "outputs" / "checkpoints" / "best.pt"
+    TOK_PATH = GENOROVA_DIR / "tokenizer" / "genorova_bpe.json"
+
+    if not CKPT_PATH.exists():
+        raise FileNotFoundError(
+            f"Checkpoint not found: {CKPT_PATH}. "
+            "Run startup download or upload best.pt manually."
+        )
+
+    ckpt = torch.load(str(CKPT_PATH), weights_only=False, map_location='cpu')
+    _cfg = ckpt['config']
+
+    MODEL_EPOCH = ckpt.get('epoch', 19)
+    MODEL_VAL_LOSS = ckpt.get('val_loss', 0.9786)
+    MAX_LEN = _cfg.get('max_seq_len', 128)
+
+    _tok = CVAETokenizer(TOK_PATH, max_len=MAX_LEN)
+
+    _model = CVAE(
+        vocab_size=_cfg['vocab_size'],
+        latent_dim=_cfg['latent_dim'],
+        d_model=_cfg['d_model'],
+        num_heads=_cfg['num_heads'],
+        num_layers=_cfg['num_layers'],
+    )
+    _model.load_state_dict(ckpt['model_state'])
+    _model.eval()
+    print(f"[MODEL] Loaded epoch={MODEL_EPOCH} val_loss={MODEL_VAL_LOSS:.4f}")
+    return _model, _tok
 
 # ── Logging ───────────────────────────────────────────────────
 LOG_DIR = GENOROVA_DIR / "outputs" / "logs"
@@ -103,21 +128,32 @@ class BatchScoreRequest(BaseModel):
 
 # ── API key auth ──────────────────────────────────────────────
 def require_key(x_api_key: Optional[str] = Header(default=None)):
+    check_api_key(x_api_key)
+
+
+def check_api_key(x_api_key: Optional[str] = None):
     if not x_api_key:
         raise HTTPException(status_code=401,
             detail="X-API-Key header required. Use any non-empty string for dev.")
 
 # ── Generation helper ─────────────────────────────────────────
 def _generate(n: int, temperature: float = 1.1) -> list[str]:
+    model, tok = _get_model()
     valid, attempts = [], 0
     max_attempts = n * 5
-    while len(valid) < n and attempts < max_attempts:
-        prop = torch.zeros(1, 4)
-        seqs = MODEL.generate(prop, max_len=MAX_LEN, beam_k=1, temperature=temperature)
-        attempts += 1
-        smi = TOK.ids_to_smiles(seqs[0])
-        if smi and Chem.MolFromSmiles(smi):
-            valid.append(smi)
+    with torch.no_grad():
+        while len(valid) < n and attempts < max_attempts:
+            prop = torch.zeros(1, 4)
+            seqs = model.generate(
+                prop,
+                max_len=MAX_LEN,
+                beam_k=1,
+                temperature=temperature,
+            )
+            smi = tok.ids_to_smiles(seqs[0])
+            attempts += 1
+            if smi and Chem.MolFromSmiles(smi):
+                valid.append(smi)
     return list(dict.fromkeys(valid))   # deduplicate preserving order
 
 # ── Endpoints ─────────────────────────────────────────────────
@@ -151,6 +187,9 @@ async def serve_dashboard():
 
 @app.get("/health", tags=["System"])
 def health():
+    ckpt_exists = (
+        GENOROVA_DIR / "outputs" / "checkpoints" / "best.pt"
+    ).exists()
     return {
         "status": "ok",
         "version": "1.0.0",
@@ -158,20 +197,19 @@ def health():
         "model_epoch": MODEL_EPOCH,
         "model_val_loss": round(MODEL_VAL_LOSS, 4),
         "model_params": "6,785,068",
-        "training_molecules": 10873,
+        "checkpoint_loaded": _model is not None,
+        "checkpoint_exists": ckpt_exists,
         "benchmarks": {
             "snn_test": 0.611,
             "snn_note": "Beats REINVENT 0.58, MolGPT 0.56, JT-VAE 0.54",
             "validity": 0.709,
             "uniqueness": 0.911,
-            "novelty": 0.641,
             "filter_pass_rate": 0.973,
             "fcd_test": 6.23
         },
         "dpp4": {
             "tanimoto_vs_sitagliptin": 0.836,
-            "top_hit_ic50_nm": 0.012,
-            "training_actives": 2273
+            "top_hit_ic50_nm": 0.012
         },
         "built_by": "Pushp Dwivedi",
         "github": "https://github.com/1Pushp",
@@ -224,7 +262,9 @@ def generate(req: GenerateRequest, _=Depends(require_key)):
     return results
 
 @app.post("/score", tags=["Scoring"])
-def score_one(req: ScoreRequest, _=Depends(require_key)):
+def score_one(req: ScoreRequest,
+              x_api_key: Optional[str] = Header(default=None)):
+    check_api_key(x_api_key)
     result = _score_smiles(req.smiles)
     if not result.get('valid'):
         raise HTTPException(status_code=422,

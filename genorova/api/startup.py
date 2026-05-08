@@ -16,7 +16,7 @@ def download_checkpoint_if_missing():
 
     try:
         import gdown
-        gdown.download(CHECKPOINT_URL, str(CHECKPOINT_PATH), quiet=False, fuzzy=True)
+        gdown.download(CHECKPOINT_URL, str(CHECKPOINT_PATH), quiet=False)
         size_mb = CHECKPOINT_PATH.stat().st_size / 1024**2
         print(f"[STARTUP] Downloaded successfully: {size_mb:.1f}MB")
         return True
