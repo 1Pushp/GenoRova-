@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import GenorovaChatAppV11 from "./GenorovaChatAppV11";
+import GenorovaWorkspace from "./GenorovaWorkspace";
 import { AuthProvider } from "./auth";
 import GenorovaLogo from "./components/GenorovaLogo";
 
@@ -684,7 +685,7 @@ export default function App() {
   if (view === "workspace") {
     return (
       <AuthProvider>
-        <GenorovaChatAppV11 />
+        <GenorovaWorkspace />
       </AuthProvider>
     );
   }
