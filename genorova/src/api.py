@@ -34,7 +34,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 # Make src/ importable
 sys.path.insert(0, str(Path(__file__).parent))
@@ -623,8 +623,10 @@ class ScoreRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    mode: str = "scientific"
-    session_id: str | None = None
+    session_id: Optional[str] = None
+    mode: Optional[str] = "scientific"
+    count: Optional[int] = 5
+    target: Optional[str] = None
     history: list[dict[str, Any]] = Field(default_factory=list)
     conversation_state: dict[str, Any] = Field(default_factory=dict)
 
@@ -2259,6 +2261,10 @@ def api_chat(
         req.conversation_state,
         _get_session_state(session_id, current_user),
     )
+    if req.count is not None:
+        merged_state["requested_count"] = req.count
+    if req.target:
+        merged_state["requested_target"] = req.target
     mode = _resolve_mode_from_message(message, _normalize_mode(req.mode), merged_state)
     intent = _parse_chat_intent(message)
     try:
@@ -3250,6 +3256,65 @@ def _build_cvae_chat_response(
     }
 
 
+def _build_chat_initializing_response(
+    *,
+    intent: str,
+    mode: str,
+    message: str,
+    target_context: dict[str, Any],
+    requested_count: int,
+) -> dict[str, Any]:
+    """Return a stable chat response when no DB, CVAE, or curated molecules are available."""
+    target_label = target_context["label"]
+    target_bucket = target_context["disease"]
+    return {
+        "intent": intent,
+        "mode": mode,
+        "message": "Database initializing. CVAE generation available.",
+        "source": "system",
+        "summary": (
+            "I'm ready to help with molecular discovery. The molecule database is initializing, "
+            f"and no valid CVAE or curated fallback molecules were available for {target_label} in this run."
+        ),
+        "candidate": None,
+        "generated_candidates": [],
+        "trust": _trust_block(
+            validation_status="generation_resources_initializing",
+            confidence_note=(
+                "The chat endpoint stayed online without the molecule database, attempted CVAE generation, "
+                "and is returning an honest empty result."
+            ),
+            result_source="system_empty_generation_fallback",
+            fallback_used=True,
+            limitations=["Molecule database not yet populated on this server"],
+            recommended_next_step=f"Try: 'generate {requested_count} {target_label} under 500 daltons'",
+        ),
+        "limitations": ["Molecule database not yet populated on this server"],
+        "next_steps": [f"Try: 'generate {requested_count} {target_label} under 500 daltons'"],
+        "warnings": [
+            "No molecule database row was required for this response.",
+            "CVAE generation was attempted before this fallback was returned.",
+            "Computational candidates require wet-lab validation.",
+        ],
+        "program_context": {
+            "requested_label": target_label,
+            "requested_target": target_context["target"],
+            "supported_bucket": target_bucket,
+            "count_returned": 0,
+            "generation_status": "generation_resources_initializing",
+            "generation_mode": "system_fallback",
+            "molecule_db_exists": DB_PATH.exists(),
+            "source": "system",
+        },
+        "conversation_state": _build_conversation_state(
+            intent=intent,
+            mode=mode,
+            target_label=target_label,
+            candidate_smiles=None,
+        ),
+    }
+
+
 def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, Any]) -> dict:
     """Route a natural-language chat request to existing Genorova logic."""
     target_context = _infer_target_context(message)
@@ -3257,6 +3322,10 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
     target_label = target_context["label"]
     resolved_smiles = _resolve_reference_smiles(message, state)
     latest_candidate_smiles = state.get("recent_candidate_smiles")
+    try:
+        default_count = int(state.get("requested_count") or 5)
+    except (TypeError, ValueError):
+        default_count = 5
 
     if intent == "score":
         if not resolved_smiles:
@@ -3364,7 +3433,16 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         base_smiles = resolved_smiles[0] if resolved_smiles else latest_candidate_smiles
         if not base_smiles:
             generated = _generate_candidates_for_disease(target_bucket, 1)
-            base_smiles = generated["molecules"][0]["smiles"]
+            generated_molecules = generated.get("molecules") or []
+            if not generated_molecules:
+                return _build_chat_initializing_response(
+                    intent=intent,
+                    mode=mode,
+                    message=message,
+                    target_context=target_context,
+                    requested_count=1,
+                )
+            base_smiles = generated_molecules[0]["smiles"]
         base_candidate = _score_smiles_payload(base_smiles)
         candidate_smiles = base_candidate.get("smiles")
         lowered = message.lower()
@@ -3404,7 +3482,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             ),
         }
 
-    requested_count = _extract_count(message, default=5)
+    requested_count = _extract_count(message, default=default_count)
     cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.1)
     cvae_molecules = _cvae_candidates_from_records(cvae_records, target_context)
     if cvae_molecules:
@@ -3417,73 +3495,94 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         )
 
     if target_bucket != ACTIVE_DISEASE:
-        trust = _cvae_trust_payload(target_context)
-        trust.update(
-            {
-                "validation_status": "cvae_generation_empty",
-                "confidence_note": (
-                    f"Genorova recognized the {target_label} and attempted the trained CVAE path, "
-                    "but the model did not produce a valid molecule in this run."
+        fallback_molecules = _fallback_reference_candidates(target_bucket, requested_count)
+        if fallback_molecules:
+            top_candidate = fallback_molecules[0]
+            candidate_smiles = top_candidate.get("smiles")
+            trust = _trust_block(
+                validation_status="curated_reference_fallback",
+                confidence_note=(
+                    f"The molecule database is not required for this response. CVAE returned no valid "
+                    f"{target_label} molecules in this run, so Genorova is showing curated reference molecules instead."
                 ),
-                "fallback_used": False,
-                "recommended_next_step": (
-                    "Try generation again, relax constraints, or score a known valid SMILES while the "
-                    "target-specific generation path is being tuned."
+                result_source="known_reference_fallback",
+                fallback_used=True,
+                limitations=[
+                    "Molecule database not yet populated on this server",
+                    "CVAE generation did not return valid molecules in this run",
+                    "Curated references are comparators, not newly generated candidates",
+                    "Computational scores are predictions and require wet-lab validation",
+                ],
+                recommended_next_step="Score, compare, or retry CVAE generation with adjusted constraints.",
+            )
+            return {
+                "intent": "generate",
+                "mode": mode,
+                "message": message,
+                "source": "known_reference_fallback",
+                "summary": (
+                    f"Genorova recognized the {target_label}. The molecule database is not required; "
+                    "CVAE generation returned no valid molecules in this run, so curated reference molecules are shown."
+                ),
+                "candidate": _candidate_block(top_candidate, label="Top curated fallback candidate"),
+                "generated_candidates": _generated_candidates_with_visuals(fallback_molecules),
+                "why": (
+                    "The chat endpoint tried the target-aware CVAE path first. Because it returned no valid SMILES, "
+                    "Genorova used curated reference molecules rather than failing or substituting the active bCA path."
+                ),
+                "chemical_properties": _chemical_properties(top_candidate),
+                "physical_properties": _physical_properties(top_candidate),
+                "validation": _validation_block(top_candidate),
+                "pharmacology": _pharmacology_block(top_candidate, target_label),
+                "trust": trust,
+                "strengths": _strengths_block(top_candidate),
+                "risks": _risks_block(top_candidate),
+                "limitations": trust.get("limitations", []),
+                "next_steps": [
+                    "Retry CVAE generation with relaxed constraints.",
+                    "Use these curated references only as comparators.",
+                    "Run synthesis and in vitro testing before drawing conclusions.",
+                ],
+                "warnings": _warnings_block(),
+                "follow_up_actions": _follow_up_actions(candidate_smiles),
+                "program_context": {
+                    "requested_label": target_label,
+                    "requested_target": target_context["target"],
+                    "supported_bucket": target_bucket,
+                    "reference_drug": target_context.get("reference_drug"),
+                    "count_returned": len(fallback_molecules),
+                    "generation_status": "curated_reference_fallback",
+                    "generation_mode": GENERATION_MODE_CURATED,
+                    "molecule_db_exists": DB_PATH.exists(),
+                    "source": "known_reference_fallback",
+                },
+                "conversation_state": _build_conversation_state(
+                    intent="generate",
+                    mode=mode,
+                    target_label=target_label,
+                    candidate_smiles=candidate_smiles,
                 ),
             }
+
+        return _build_chat_initializing_response(
+            intent="generate",
+            mode=mode,
+            message=message,
+            target_context=target_context,
+            requested_count=requested_count,
         )
-        return {
-            "intent": "generate",
-            "mode": mode,
-            "message": message,
-            "source": CVAE_SOURCE,
-            "summary": (
-                f"Genorova recognized the {target_label} and tried the trained CVAE generation path, "
-                "but no valid molecules were produced in this run. No active bCA fallback was used for this target."
-            ),
-            "candidate": None,
-            "generated_candidates": [],
-            "trust": trust,
-            "limitations": trust.get("limitations", []),
-            "why": (
-                "The request was routed to the target-aware CVAE path first. Because that path returned no valid "
-                "SMILES, Genorova is reporting an empty result instead of substituting molecules from another program."
-            ),
-            "risks": [
-                "The current CVAE sample did not yield a valid molecule for this request.",
-                "Returning molecules from an unrelated active program would misrepresent the target context.",
-            ],
-            "next_steps": [
-                "Try again with fewer constraints or a slightly higher requested count.",
-                "Score a known valid SMILES for this target while generation is being tuned.",
-                "Use the result as a system availability signal, not as a chemistry conclusion.",
-            ],
-            "warnings": _cvae_warnings(target_context),
-            "follow_up_actions": [
-                {"label": "Retry Generation", "prompt": f"Generate {requested_count} molecules for {target_label}"},
-                {"label": "Score Known Molecule", "prompt": "Score this molecule: CCO"},
-            ],
-            "program_context": {
-                **CVAE_MODEL_CONTEXT,
-                "requested_label": target_label,
-                "requested_target": target_context["target"],
-                "supported_bucket": target_bucket,
-                "reference_drug": target_context.get("reference_drug"),
-                "count_returned": 0,
-                "generation_status": "cvae_generation_empty",
-                "generation_mode": GENERATION_MODE_REAL,
-                "source": CVAE_SOURCE,
-            },
-            "conversation_state": _build_conversation_state(
-                intent="generate",
-                mode=mode,
-                target_label=target_label,
-                candidate_smiles=None,
-            ),
-        }
 
     generated = _generate_candidates_for_disease(target_bucket, requested_count)
     if generated.get("count_returned", 0) == 0:
+        if not DB_PATH.exists():
+            return _build_chat_initializing_response(
+                intent="generate",
+                mode=mode,
+                message=message,
+                target_context=target_context,
+                requested_count=requested_count,
+            )
+
         trust = generated.get("trust", _trust_block(
             validation_status="no_valid_candidate_available",
             confidence_note="No valid candidate was available in this run.",
