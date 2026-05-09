@@ -46,6 +46,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from rdkit import Chem
 from science_evidence import (
     ACTIVE_DISEASE,
     ACTIVE_PROGRAM_LABEL,
@@ -147,6 +148,35 @@ TARGET_CONTEXTS: tuple[dict[str, Any], ...] = (
         ),
     },
 )
+CONCEPTS = {
+    "qed": (
+        "QED (Quantitative Estimate of Drug-likeness) is a score from 0 to 1 that estimates "
+        "how drug-like a molecule is. A score above 0.6 is generally good, and above 0.7 is excellent."
+    ),
+    "admet": (
+        "ADMET means Absorption, Distribution, Metabolism, Excretion, and Toxicity. "
+        "These predictions estimate how a drug may behave in the body."
+    ),
+    "tanimoto": (
+        "Tanimoto similarity is a 0 to 1 structural similarity measure between molecules. "
+        "Above 0.7 usually means similar, and 0.836 is very close structurally."
+    ),
+    "lipinski": (
+        "Lipinski Rule of 5 checks molecular weight below 500, LogP below 5, hydrogen bond donors "
+        "at most 5, and hydrogen bond acceptors at most 10. It is a quick oral bioavailability screen."
+    ),
+    "smiles": (
+        "SMILES is a text representation of a molecule. Example: CC(=O)Oc1ccccc1C(=O)O is aspirin."
+    ),
+    "drug likeness": (
+        "Drug-likeness estimates whether a molecule has properties often seen in successful medicines, "
+        "such as balanced size, polarity, lipophilicity, and hydrogen bonding."
+    ),
+    "drug-likeness": (
+        "Drug-likeness estimates whether a molecule has properties often seen in successful medicines, "
+        "such as balanced size, polarity, lipophilicity, and hydrogen bonding."
+    ),
+}
 
 if not logging.getLogger().handlers:
     logging.basicConfig(
@@ -2409,6 +2439,19 @@ def _extract_smiles_candidates(message: str) -> list[str]:
     return list(dict.fromkeys(tokens))
 
 
+def is_valid_smiles(candidate: str | None) -> bool:
+    """Return True only for plausible RDKit-parseable SMILES strings."""
+    if not candidate or len(candidate) < 3:
+        return False
+    chemistry_chars = set("CNOPSFClBrI()[]=#@+\\/-")
+    if not any(char in chemistry_chars for char in candidate):
+        return False
+    try:
+        return Chem.MolFromSmiles(candidate) is not None
+    except Exception:
+        return False
+
+
 def _extract_count(message: str, default: int = 5) -> int:
     """Read a requested molecule count from chat text."""
     count_text = re.sub(
@@ -2469,7 +2512,10 @@ def _parse_chat_intent(message: str) -> str:
 
 def _resolve_reference_smiles(message: str, state: dict[str, Any]) -> list[str]:
     """Resolve explicit or contextual molecule references for follow-up prompts."""
-    extracted = _extract_smiles_candidates(message)
+    extracted = [
+        token for token in _extract_smiles_candidates(message)
+        if is_valid_smiles(token)
+    ]
     if extracted:
         return extracted
 
@@ -2477,12 +2523,12 @@ def _resolve_reference_smiles(message: str, state: dict[str, Any]) -> list[str]:
     best_smiles = state.get("recent_best_smiles") or _best_available_smiles()
     lowered = message.lower()
 
-    if latest_candidate and _has_follow_up_reference(message):
-        if "best" in lowered and "compare" in lowered and best_smiles:
+    if latest_candidate and is_valid_smiles(latest_candidate) and _has_follow_up_reference(message):
+        if "best" in lowered and "compare" in lowered and best_smiles and is_valid_smiles(best_smiles):
             return [latest_candidate, best_smiles]
         return [latest_candidate]
 
-    if ("best one" in lowered or "best molecule" in lowered) and best_smiles:
+    if ("best one" in lowered or "best molecule" in lowered) and best_smiles and is_valid_smiles(best_smiles):
         return [best_smiles]
 
     return []
@@ -3321,6 +3367,60 @@ def _build_chat_initializing_response(
     }
 
 
+def _concept_response(message: str, mode: str) -> dict[str, Any] | None:
+    """Return a concise knowledge response for drug-discovery concept questions."""
+    msg_lower = message.lower()
+    for concept, explanation in CONCEPTS.items():
+        if concept in msg_lower:
+            return {
+                "intent": "explain",
+                "mode": mode,
+                "message": message,
+                "summary": explanation,
+                "source": "knowledge_base",
+                "generated_candidates": [],
+                "limitations": [],
+                "next_steps": [
+                    "Try: 'generate DPP-4 inhibitors'",
+                    "Or paste a SMILES to score it",
+                ],
+                "conversation_state": _build_conversation_state(
+                    intent="explain",
+                    mode=mode,
+                    target_label="Drug discovery concept",
+                    candidate_smiles=None,
+                ),
+            }
+    return None
+
+
+def _non_smiles_explanation_response(message: str, mode: str) -> dict[str, Any]:
+    """Guide users who asked to score/explain text that is not a molecule."""
+    return {
+        "intent": "explain",
+        "mode": mode,
+        "message": message,
+        "summary": (
+            f"You asked about '{message}'. I can explain drug discovery concepts and score molecules. "
+            "To score a specific molecule, paste its SMILES string. Example: "
+            "CC(=O)Oc1ccccc1C(=O)O (aspirin)."
+        ),
+        "generated_candidates": [],
+        "source": "system",
+        "limitations": [],
+        "next_steps": [
+            "Paste a SMILES string to score a molecule",
+            "Or ask: 'generate DPP-4 inhibitors'",
+        ],
+        "conversation_state": _build_conversation_state(
+            intent="explain",
+            mode=mode,
+            target_label="Drug discovery concept",
+            candidate_smiles=None,
+        ),
+    }
+
+
 def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, Any]) -> dict:
     """Route a natural-language chat request to existing Genorova logic."""
     target_context = _infer_target_context(message)
@@ -3335,7 +3435,10 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
 
     if intent == "score":
         if not resolved_smiles:
-            raise HTTPException(status_code=422, detail="Please include a SMILES string to score.")
+            concept_response = _concept_response(message, mode)
+            if concept_response:
+                return concept_response
+            return _non_smiles_explanation_response(message, mode)
         score_payload = _score_smiles_payload(resolved_smiles[0])
         candidate_smiles = score_payload.get("smiles")
         return {
@@ -3365,7 +3468,14 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         }
 
     if intent == "explain":
+        concept_response = _concept_response(message, mode)
+        if concept_response and not resolved_smiles and not (
+            latest_candidate_smiles and _has_follow_up_reference(message)
+        ):
+            return concept_response
         base_smiles = resolved_smiles[0] if resolved_smiles else latest_candidate_smiles or _best_available_smiles()
+        if not is_valid_smiles(base_smiles):
+            return concept_response or _non_smiles_explanation_response(message, mode)
         score_payload = _score_smiles_payload(base_smiles)
         candidate_smiles = score_payload.get("smiles")
         return {
