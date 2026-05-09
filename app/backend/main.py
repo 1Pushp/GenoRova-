@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -101,11 +101,15 @@ def _frontend_index_response() -> FileResponse | dict[str, str]:
     return {"error": "Frontend not built"}
 
 
-async def serve_root():
+async def serve_root(request: Request):
+    if request.method == "HEAD":
+        return Response(status_code=200)
     return _frontend_index_response()
 
 
-async def serve_spa(full_path: str):
+async def serve_spa(request: Request, full_path: str):
+    if request.method == "HEAD":
+        return Response(status_code=200)
     return _frontend_index_response()
 
 
@@ -119,7 +123,9 @@ def _register_frontend_serving() -> None:
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
     _register_route("/", "GET", serve_root, include_in_schema=False)
+    _register_route("/", "HEAD", serve_root, include_in_schema=False)
     _register_route("/{full_path:path}", "GET", serve_spa, include_in_schema=False)
+    _register_route("/{full_path:path}", "HEAD", serve_spa, include_in_schema=False)
 
 
 def _optional_user_id(request: Request) -> str | None:
