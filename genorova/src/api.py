@@ -94,6 +94,59 @@ STARTUP_STATE: dict[str, Any] = {
     "last_error": None,
     "warnings": [],
 }
+CVAE_SOURCE = "genorova-cvae-v1"
+CVAE_MODEL_CONTEXT = {
+    "model": "Genorova CVAE v1.0",
+    "epoch": 19,
+    "val_loss": 0.9786,
+    "snn_test": 0.611,
+    "benchmark": "Beats REINVENT 0.58 on SNN/Test",
+}
+CVAE_TRUST_CONTEXT = {
+    "model_source": "Trained CVAE - 6.78M parameters",
+    "training_data": "10,873 drug-like molecules",
+    "validation": "MOSES benchmark suite",
+    "disclaimer": "Computationally generated — not experimentally validated",
+}
+CVAE_LIMITATIONS = [
+    "Computationally generated — not experimentally validated",
+    "ADMET scores are predictions, not measurements",
+    "Tanimoto similarity does not imply biological equivalence",
+    "Requires synthesis and in vitro testing before conclusions",
+]
+TARGET_CONTEXTS: tuple[dict[str, Any], ...] = (
+    {
+        "target": "dpp4",
+        "disease": "diabetes",
+        "label": "DPP-4 inhibitor diabetes research program",
+        "reference_drug": "sitagliptin",
+        "keywords": (
+            "dpp4",
+            "dpp-4",
+            "diabetes",
+            "sitagliptin",
+            "saxagliptin",
+            "dipeptidyl",
+            "type 2",
+            "t2dm",
+        ),
+    },
+    {
+        "target": "gyrase",
+        "disease": "infection",
+        "label": "Gyrase B antibacterial research program",
+        "reference_drug": "ciprofloxacin",
+        "keywords": (
+            "gyrase",
+            "gyrase b",
+            "antibacterial",
+            "bacterial",
+            "antibiotic",
+            "ciprofloxacin",
+            "dna gyrase",
+        ),
+    },
+)
 
 if not logging.getLogger().handlers:
     logging.basicConfig(
@@ -187,7 +240,7 @@ def _binding_truth_fields(raw_mode: str | None) -> dict[str, str]:
         return {
             "binding_truth": "PREDICTED_OFFLINE",
             "binding_mode_public": "predicted_offline",
-            "binding_claim": "predicted binding (Vina-validated offline)",
+            "binding_claim": "predicted binding (Vina-calibrated offline)",
         }
     return {
         "binding_truth": "UNAVAILABLE",
@@ -212,9 +265,9 @@ def _public_candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:
 
     if public["binding_truth"] == "PREDICTED_OFFLINE":
         existing_reason = str(public.get("binding_mode_reason") or "").strip()
-        if not existing_reason.lower().startswith("predicted binding (vina-validated offline):"):
+        if not existing_reason.lower().startswith("predicted binding (vina-calibrated offline):"):
             public["binding_mode_reason"] = (
-                f"Predicted binding (Vina-validated offline): live docking did not run for this request. {existing_reason}".strip()
+                f"Predicted binding (Vina-calibrated offline): live docking did not run for this request. {existing_reason}".strip()
             )
 
     binding_provenance = public.get("binding_provenance")
@@ -352,18 +405,73 @@ def _chat_storage_status() -> dict[str, Any] | None:
     return backend_chat_memory.get_storage_status()
 
 
+def _rate_limit_status() -> dict[str, Any]:
+    """Return rate-limit configuration and billing state without exposing user data."""
+    try:
+        import auth_store as _as
+        plan_limits = dict(_as.PLAN_LIMITS)
+        default_plan = _as.DEFAULT_PLAN
+    except Exception:
+        plan_limits = {}
+        default_plan = "unknown"
+    return {
+        "active": True,
+        "enforcement": "per_user_daily_on_generate",
+        "default_plan": default_plan,
+        "plan_limits": plan_limits,
+        "reset": "midnight UTC",
+        "billing": "deferred",
+        "billing_note": "All accounts default to the free tier. Paid tiers require manual admin upgrade.",
+    }
+
+
+def _api_key_status() -> dict[str, Any]:
+    """Return API key system status without exposing any key material."""
+    try:
+        conn = sqlite3.connect(str(AUTH_DB_PATH), timeout=2)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM api_keys WHERE revoked = 0"
+        ).fetchone()
+        conn.close()
+        active_keys = int(row[0]) if row else 0
+        system_active = True
+    except Exception:
+        active_keys = None
+        system_active = False
+    return {
+        "active": system_active,
+        "endpoints": [
+            "POST /api/keys/create",
+            "GET  /api/keys/list",
+            "DELETE /api/keys/{key_id}",
+        ],
+        "auth_method": "Authorization: Bearer <key>",
+        "active_key_count": active_keys,
+    }
+
+
 def _ops_status_payload() -> dict[str, Any]:
     auth_status = _auth_storage_status()
     molecule_status = _molecule_storage_status()
     frontend_status = _frontend_status()
     chat_status = _chat_session_status()
     warnings = _runtime_warnings(auth_status, chat_status)
+
+    chat_durable = chat_status.get("durability") != "ephemeral"
+    if not chat_durable and "chat_session_ephemeral" not in warnings:
+        warnings = list(warnings) + ["chat_session_ephemeral"]
+
     health_state = "degraded" if warnings else "ok"
 
     return {
         "status": health_state,
         "prototype_status": PROTOTYPE_STATUS,
+        "app_version": APP_VERSION,
         "timestamp": datetime.now().isoformat(),
+        "trust_statement": (
+            "GenorovaAI is a computational research-support platform. "
+            "Outputs are screening signals, not experimental proof or clinical validation."
+        ),
         "startup": {
             **STARTUP_STATE,
             "auth_db_path": str(AUTH_DB_PATH),
@@ -373,12 +481,30 @@ def _ops_status_payload() -> dict[str, Any]:
         "storage": {
             "auth": auth_status,
             "molecules": molecule_status,
-            "chat_session": chat_status,
+            "chat_session": {
+                **chat_status,
+                "durable": chat_durable,
+                "warning": (
+                    None if chat_durable
+                    else "Chat sessions are stored in process memory and will be lost on restart."
+                ),
+            },
             "frontend": frontend_status,
             "report": {
                 "available": REPORT_PATH.exists(),
                 "path": str(REPORT_PATH),
             },
+        },
+        "rate_limiting": _rate_limit_status(),
+        "api_key_system": _api_key_status(),
+        "usage_tracking": {
+            "active": True,
+            "endpoint": "GET /api/usage",
+            "note": "Per-user daily usage recorded on each successful /generate call.",
+        },
+        "billing": {
+            "status": "deferred",
+            "note": "No payment infrastructure is active. All accounts are on the free tier.",
         },
         "degraded_states": warnings,
         "recommended_actions": [
@@ -425,13 +551,12 @@ async def _app_lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title       = "Genorova AI — Computational Molecule Analysis API",
-    description = (
-        "Prototype research-support API for computational molecule scoring, "
-        "comparison, and conservative ranked-molecule retrieval. Outputs are "
-        "not experimentally validated and should not be treated as treatment advice."
-    ),
-    version     = APP_VERSION,
+    title       = "Genorova AI API",
+    description = "Conversational drug discovery API",
+    version     = "1.0.0",
+    docs_url    = "/api-docs",
+    redoc_url   = "/api-redoc",
+    openapi_url = "/api/openapi.json",
     contact     = {
         "name":  "Pushp Dwivedi",
         "email": "pushpdwivedi911@gmail.com",
@@ -806,6 +931,256 @@ def _generation_probe_size(count: int) -> int:
     )
 
 
+def generate_from_cvae(
+    n_molecules: int = 10,
+    temperature: float = 1.1,
+    mw_max: float = 550,
+    qed_min: float = 0.0,
+) -> list[dict[str, Any]]:
+    """
+    Call the trained CVAE best.pt model for molecule generation.
+
+    Returns scored row dictionaries and falls back gracefully if the CVAE
+    checkpoint or imports are unavailable in the current runtime.
+    """
+    try:
+        repo_root = ROOT_DIR.parent
+        for path in (repo_root, ROOT_DIR, ROOT_DIR / "src"):
+            path_text = str(path)
+            if path_text not in sys.path:
+                sys.path.insert(0, path_text)
+
+        from genorova.api.main import _generate, _score_batch
+
+        requested = max(1, min(int(n_molecules), 50))
+        smiles_list = _generate(requested, temperature)
+        if not smiles_list:
+            return []
+
+        df = _score_batch(smiles_list)
+        if df is None or not hasattr(df, "columns") or df.empty:
+            return []
+
+        if "valid" in df.columns:
+            df = df[df["valid"] == True]  # noqa: E712 - pandas boolean mask
+        mw_col = "mol_weight" if "mol_weight" in df.columns else "MW"
+        if mw_col in df.columns:
+            df = df[df[mw_col] <= mw_max]
+        if "QED" in df.columns:
+            df = df[df["QED"] >= qed_min]
+        if "composite_score" in df.columns:
+            df = df.sort_values("composite_score", ascending=False)
+
+        return df.head(requested).to_dict("records")
+    except Exception as exc:
+        print(f"[CVAE] Generation failed: {exc}")
+        return []
+
+
+def _cvae_float(row: dict[str, Any], key: str, default: float = 0.0) -> float:
+    """Read numeric CVAE scorer fields without leaking NaN into JSON."""
+    try:
+        value = row.get(key)
+        if value in (None, ""):
+            return default
+        number = float(value)
+        if number != number:
+            return default
+        return round(number, 4)
+    except (TypeError, ValueError):
+        return default
+
+
+def _cvae_bool(value: Any) -> bool:
+    """Normalize pandas/numpy/string booleans from the CVAE scoring table."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _cvae_recommendation(grade: str, lipinski_pass: bool) -> tuple[str, str]:
+    """Map CVAE scorer grades to the chat card's conservative decision language."""
+    normalized_grade = str(grade or "").upper()
+    if normalized_grade == "A" and lipinski_pass:
+        return "advance", "provisional CVAE-generated candidate"
+    if normalized_grade in {"A", "B"}:
+        return "conditional_advance", "conditional CVAE-generated lead"
+    if normalized_grade == "C":
+        return "conditional_advance", "early CVAE-generated optimization candidate"
+    return "reject", "low-priority CVAE-generated result"
+
+
+def _cvae_candidate_from_row(
+    row: dict[str, Any],
+    rank: int,
+    target_context: dict[str, Any],
+) -> dict[str, Any]:
+    """Convert a CVAE scorer row into the chat candidate schema."""
+    mw = _cvae_float(row, "mol_weight", _cvae_float(row, "MW"))
+    logp = _cvae_float(row, "LogP")
+    qed = _cvae_float(row, "QED")
+    sa_score = _cvae_float(row, "SA_Score")
+    composite_score = _cvae_float(row, "composite_score")
+    clinical_score = round(composite_score / 100.0, 4)
+    lipinski_pass = _cvae_bool(row.get("lipinski_pass"))
+    grade = str(row.get("grade") or "N/A")
+    final_decision, recommendation = _cvae_recommendation(grade, lipinski_pass)
+    target_label = target_context["label"]
+    reference_drug = target_context.get("reference_drug") or ACTIVE_REFERENCE_DRUG
+    limitations = list(CVAE_LIMITATIONS)
+
+    validation_snapshot = {
+        "active_program": target_label,
+        "canonical_target": target_context["target"],
+        "reference_drug": reference_drug,
+        "final_decision": final_decision,
+        "decision_score": clinical_score,
+        "confidence_level": "medium",
+        "evidence_level": "cvae_generation_rdkit_descriptor_screen",
+        "binding_checked": False,
+        "binding_mode": "unavailable",
+        "binding_truth": "UNAVAILABLE",
+        "binding_claim": "binding unavailable",
+        "final_binding_reason": (
+            f"Target-specific binding was not run for {target_label}; this chat result is CVAE generation plus RDKit scoring."
+        ),
+        "overall_safety_flag": "descriptor_screen_only",
+        "overall_safety_reason": "RDKit descriptor screening completed; full ADMET validation remains required.",
+        "overall_safety_method": "RDKit descriptor and PAINS screen",
+        "admet_evidence_level": "rdkit_descriptor_screen",
+        "novelty_status": "not_checked",
+        "novelty_reason": "External novelty lookup was not run during CVAE chat generation.",
+        "sa_score": sa_score,
+        "is_pains": _cvae_bool(row.get("pains_flag")),
+        "docking_mode": "unavailable",
+        "hepatotoxicity_risk": "not_assessed",
+        "hERG_risk": "not_assessed",
+        "cyp_interaction_risk": "not_assessed",
+    }
+
+    return {
+        "rank": rank,
+        "smiles": str(row.get("smiles") or "").strip(),
+        "valid": _cvae_bool(row.get("valid", True)),
+        "source": CVAE_SOURCE,
+        "generated_by": CVAE_MODEL_CONTEXT["model"],
+        "generation_model": CVAE_MODEL_CONTEXT["model"],
+        "model_epoch": CVAE_MODEL_CONTEXT["epoch"],
+        "model_val_loss": CVAE_MODEL_CONTEXT["val_loss"],
+        "model_params": "6,785,068",
+        "program_label": target_label,
+        "target": target_context["target"],
+        "target_label": target_label,
+        "target_disease": target_context["disease"],
+        "reference_drug": reference_drug,
+        "molecular_weight": mw,
+        "mol_weight": mw,
+        "MW": mw,
+        "logp": logp,
+        "LogP": logp,
+        "qed_score": qed,
+        "QED": qed,
+        "sa_score": sa_score,
+        "SA_Score": sa_score,
+        "h_bond_donors": int(_cvae_float(row, "HBD")),
+        "h_bond_acceptors": int(_cvae_float(row, "HBA")),
+        "tpsa": _cvae_float(row, "TPSA"),
+        "rotatable_bonds": int(_cvae_float(row, "RotBonds")),
+        "fraction_csp3": _cvae_float(row, "Fsp3"),
+        "lipinski_pass": lipinski_pass,
+        "passes_lipinski": lipinski_pass,
+        "lipinski_violations": int(_cvae_float(row, "lipinski_violations")),
+        "pains_flag": _cvae_bool(row.get("pains_flag")),
+        "is_pains": _cvae_bool(row.get("pains_flag")),
+        "composite_score": composite_score,
+        "clinical_score": clinical_score,
+        "rank_score": clinical_score,
+        "model_score": clinical_score,
+        "grade": grade,
+        "recommendation": recommendation,
+        "rank_label": recommendation,
+        "final_decision": final_decision,
+        "decision_score": clinical_score,
+        "decision_provenance": {
+            "final_decision": final_decision,
+            "decision_score": clinical_score,
+            "confidence_tier": "medium",
+            "evidence_level": "cvae_generation_rdkit_descriptor_screen",
+            "final_decision_reason": (
+                f"{CVAE_MODEL_CONTEXT['model']} produced this valid SMILES and the RDKit composite score is {composite_score:.2f}/100."
+            ),
+            "provenance_explanation": "Decision is based on CVAE generation plus RDKit descriptor predictions, not wet-lab evidence.",
+        },
+        "confidence_level": "medium",
+        "evidence_level": "cvae_generation_rdkit_descriptor_screen",
+        "validation_status": "cvae_generated_rdkit_scored",
+        "confidence_note": (
+            "Generated by the trained CVAE best.pt model and ranked with offline RDKit descriptor predictions; "
+            "target-specific binding and wet-lab validation are still required."
+        ),
+        "limitations": limitations,
+        "recommended_next_step": "Run target-specific validation, novelty checks, synthesis review, and in vitro testing before drawing conclusions.",
+        "result_source": CVAE_SOURCE,
+        "fallback_used": False,
+        "binding_checked": False,
+        "binding_mode": "unavailable",
+        "docking_mode": "unavailable",
+        "binding_truth": "UNAVAILABLE",
+        "binding_claim": "binding unavailable",
+        "final_binding_reason": validation_snapshot["final_binding_reason"],
+        "overall_safety_flag": validation_snapshot["overall_safety_flag"],
+        "overall_safety_reason": validation_snapshot["overall_safety_reason"],
+        "overall_safety_method": validation_snapshot["overall_safety_method"],
+        "admet_evidence_level": validation_snapshot["admet_evidence_level"],
+        "novelty_status": validation_snapshot["novelty_status"],
+        "novelty_reason": validation_snapshot["novelty_reason"],
+        "hepatotoxicity_risk": validation_snapshot["hepatotoxicity_risk"],
+        "herg_risk": validation_snapshot["hERG_risk"],
+        "cyp_interaction_risk": validation_snapshot["cyp_interaction_risk"],
+        "validation": validation_snapshot,
+    }
+
+
+def _cvae_candidates_from_records(
+    records: list[dict[str, Any]],
+    target_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return valid, UI-ready CVAE candidates."""
+    candidates = []
+    for record in records:
+        candidate = _cvae_candidate_from_row(record, len(candidates) + 1, target_context)
+        if candidate["smiles"] and candidate["valid"]:
+            candidates.append(candidate)
+    return candidates
+
+
+def _cvae_trust_payload(target_context: dict[str, Any]) -> dict[str, Any]:
+    """Trust metadata shown when chat generation succeeds through best.pt."""
+    return {
+        **CVAE_TRUST_CONTEXT,
+        "prototype_status": PROTOTYPE_STATUS,
+        "active_program": target_context["label"],
+        "validation_status": "cvae_generated_rdkit_scored",
+        "confidence_note": (
+            "Generated by the trained CVAE best.pt model and ranked with offline RDKit descriptor predictions."
+        ),
+        "result_source": CVAE_SOURCE,
+        "fallback_used": False,
+        "limitations": list(CVAE_LIMITATIONS),
+        "recommended_next_step": "Review target-specific binding, novelty, synthesis, and in vitro assays before drawing conclusions.",
+    }
+
+
+def _cvae_warnings(target_context: dict[str, Any]) -> list[str]:
+    """Warnings for the CVAE chat path without active-program fallback wording."""
+    return [
+        f"This request was routed to the {target_context['label']} using the trained CVAE generation path.",
+        "This is a computational prediction for research support only.",
+        "The result is hypothesis-generating and not experimentally validated.",
+        "Do not interpret this as a proven drug, safe therapy, or clinical recommendation.",
+    ]
+
+
 def _generation_backend_specs() -> list[dict[str, Any]]:
     """Return the ordered list of generation backends to probe."""
     return [
@@ -991,7 +1366,7 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
     generation_mode = GENERATION_MODE_REAL
     fallback_used = False
     confidence_note = (
-        "Fresh molecules were generated live from the autoregressive model and then revalidated under the active Genorova program."
+        "Fresh molecules were generated live from the autoregressive model and then screened under the active Genorova program."
     )
     limitations = [
         ACTIVE_SCOPE_NOTE,
@@ -1139,7 +1514,7 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
         "generation_mode":  generation_mode,
         "generation_diagnostics": generation_diagnostics,
         "message": (
-            "Showing freshly generated and revalidated molecules from the live autoregressive Genorova path."
+            "Showing freshly generated and computationally screened molecules from the live autoregressive Genorova path."
             if generation_mode == GENERATION_MODE_REAL else
             "Showing curated-library molecules because live generation did not return a trustworthy candidate set in this request."
         ),
@@ -2021,31 +2396,42 @@ def _extract_smiles_candidates(message: str) -> list[str]:
 
 def _extract_count(message: str, default: int = 5) -> int:
     """Read a requested molecule count from chat text."""
-    match = re.search(r"\b(\d{1,3})\b", message)
+    count_text = re.sub(
+        r"\bdpp\s*-\s*4\b|\bdpp4\b|\btype\s*2\b|\bt2dm\b",
+        "",
+        message,
+        flags=re.IGNORECASE,
+    )
+    match = re.search(r"\b(\d{1,3})\b", count_text)
     if not match:
         return default
     return max(1, min(int(match.group(1)), 20))
 
 
+def _default_target_context() -> dict[str, Any]:
+    """Return the active target context when a prompt has no target clue."""
+    return {
+        "target": ACTIVE_TARGET,
+        "disease": ACTIVE_DISEASE,
+        "label": ACTIVE_PROGRAM_LABEL,
+        "reference_drug": ACTIVE_REFERENCE_DRUG,
+        "keywords": (),
+    }
+
+
+def _infer_target_context(message: str) -> dict[str, Any]:
+    """Map a prompt to the best supported target/disease context."""
+    lowered = message.lower()
+    for context in TARGET_CONTEXTS:
+        if any(keyword in lowered for keyword in context["keywords"]):
+            return dict(context)
+    return _default_target_context()
+
+
 def _infer_disease_area(message: str) -> tuple[str, str]:
     """Map a user disease request to the current Genorova supported disease buckets."""
-    lowered = message.lower()
-    disease_map = {
-        "diabetes": (ACTIVE_DISEASE, ACTIVE_PROGRAM_LABEL),
-        "tb": ("infection", "archived infection lead story"),
-        "tuberculosis": ("infection", "archived infection lead story"),
-        "infection": ("infection", "archived infection lead story"),
-        "infectious": ("infection", "archived infection lead story"),
-        "bacterial": ("infection", "archived infection lead story"),
-        "viral": ("infection", "archived infection lead story"),
-        "sepsis": ("infection", "archived infection lead story"),
-        "pneumonia": ("infection", "archived infection lead story"),
-        "covid": ("infection", "archived infection lead story"),
-    }
-    for keyword, mapping in disease_map.items():
-        if keyword in lowered:
-            return mapping
-    return (ACTIVE_DISEASE, ACTIVE_PROGRAM_LABEL)
+    target_context = _infer_target_context(message)
+    return target_context["disease"], target_context["label"]
 
 
 def _parse_chat_intent(message: str) -> str:
@@ -2425,7 +2811,7 @@ def _build_generation_fallback_summary(target_label: str, generated: dict[str, A
         )
     if generation_mode == GENERATION_MODE_REAL:
         return (
-            "These molecules were freshly generated by the live autoregressive model and then revalidated under the active program."
+            "These molecules were freshly generated by the live autoregressive model and then computationally screened under the active program."
         )
     if count_returned == 0:
         return (
@@ -2609,9 +2995,9 @@ def _risks_block(score_payload: dict) -> list[str]:
         risks.append("Lower QED suggests weaker overall drug-like balance.")
     raw_binding_mode = score_payload.get("binding_path_mode_raw") or score_payload.get("binding_mode")
     if raw_binding_mode == "fallback_proxy":
-        risks.append("Binding is being reported as predicted binding (Vina-validated offline) because live docking was blocked or failed.")
+        risks.append("Binding is being reported as predicted binding (Vina-calibrated offline) because live docking was blocked or failed.")
     elif raw_binding_mode == "scaffold_proxy":
-        risks.append("Binding is being reported as predicted binding (Vina-validated offline) from a scaffold proxy rather than a live docking run.")
+        risks.append("Binding is being reported as predicted binding (Vina-calibrated offline) from a scaffold proxy rather than a live docking run.")
     elif binding.get("binding_checked") is False:
         risks.append("Binding was not checked because the active binding path could not evaluate the input structure.")
     if admet.get("overall_safety_reason"):
@@ -2804,9 +3190,68 @@ def _compare_molecules(first: dict, second: dict) -> dict:
     }
 
 
+def _build_cvae_chat_response(
+    *,
+    intent: str,
+    mode: str,
+    message: str,
+    target_context: dict[str, Any],
+    molecules: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the rich chat payload for successful CVAE generation."""
+    target_label = target_context["label"]
+    top_candidate = molecules[0]
+    candidate_smiles = top_candidate.get("smiles")
+    trust = _cvae_trust_payload(target_context)
+    program_context = {
+        **CVAE_MODEL_CONTEXT,
+        "requested_label": target_label,
+        "requested_target": target_context["target"],
+        "supported_bucket": target_context["disease"],
+        "reference_drug": target_context.get("reference_drug"),
+        "count_returned": len(molecules),
+        "generation_status": "cvae_generation",
+        "generation_mode": GENERATION_MODE_REAL,
+        "source": CVAE_SOURCE,
+    }
+    return {
+        "intent": "generate",
+        "mode": mode,
+        "message": message,
+        "source": CVAE_SOURCE,
+        "summary": (
+            f"Generated {len(molecules)} candidates with {CVAE_MODEL_CONTEXT['model']} "
+            f"for the {target_label}. The molecules were ranked with the offline RDKit ADMET screen."
+        ),
+        "candidate": _candidate_block(top_candidate, label="Top CVAE-generated candidate"),
+        "generated_candidates": _generated_candidates_with_visuals(molecules),
+        "why": _mode_specific_why(mode, top_candidate, target_label),
+        "chemical_properties": _chemical_properties(top_candidate),
+        "physical_properties": _physical_properties(top_candidate),
+        "validation": _validation_block(top_candidate),
+        "pharmacology": _pharmacology_block(top_candidate, target_label),
+        "trust": trust,
+        "strengths": _strengths_block(top_candidate),
+        "risks": _risks_block(top_candidate),
+        "limitations": trust.get("limitations", []),
+        "next_steps": _next_steps_block(intent),
+        "warnings": _cvae_warnings(target_context),
+        "follow_up_actions": _follow_up_actions(candidate_smiles),
+        "program_context": program_context,
+        "conversation_state": _build_conversation_state(
+            intent="generate",
+            mode=mode,
+            target_label=target_label,
+            candidate_smiles=candidate_smiles,
+        ),
+    }
+
+
 def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, Any]) -> dict:
     """Route a natural-language chat request to existing Genorova logic."""
-    target_bucket, target_label = _infer_disease_area(message)
+    target_context = _infer_target_context(message)
+    target_bucket = target_context["disease"]
+    target_label = target_context["label"]
     resolved_smiles = _resolve_reference_smiles(message, state)
     latest_candidate_smiles = state.get("recent_candidate_smiles")
 
@@ -2956,7 +3401,19 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             ),
         }
 
-    generated = _generate_candidates_for_disease(target_bucket, _extract_count(message, default=5))
+    requested_count = _extract_count(message, default=5)
+    cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.1)
+    cvae_molecules = _cvae_candidates_from_records(cvae_records, target_context)
+    if cvae_molecules:
+        return _build_cvae_chat_response(
+            intent=intent,
+            mode=mode,
+            message=message,
+            target_context=target_context,
+            molecules=cvae_molecules,
+        )
+
+    generated = _generate_candidates_for_disease(target_bucket, requested_count)
     if generated.get("count_returned", 0) == 0:
         trust = generated.get("trust", _trust_block(
             validation_status="no_valid_candidate_available",

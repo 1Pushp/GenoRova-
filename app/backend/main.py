@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 try:
@@ -15,10 +18,12 @@ except ImportError:
     from chat_logic import handle_chat_message
 
 from genorova.src import api as core_api
+from genorova.src import auth_store
 
 
 LOGGER = logging.getLogger("genorova.backend")
 app = core_api.app
+DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 class ChatRequest(BaseModel):
@@ -82,23 +87,73 @@ def _register_route(path: str, method: str, endpoint, **kwargs: Any) -> None:
         app.router.routes.insert(catch_all_index, route)
 
 
+def _mount_exists(path: str) -> bool:
+    for route in app.router.routes:
+        if getattr(route, "path", None) == path:
+            return True
+    return False
+
+
+def _frontend_index_response() -> FileResponse | dict[str, str]:
+    index = DIST / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+    return {"error": "Frontend not built"}
+
+
+async def serve_root():
+    return _frontend_index_response()
+
+
+async def serve_spa(full_path: str):
+    return _frontend_index_response()
+
+
+async def docs_redirect():
+    return RedirectResponse(url="/api-docs")
+
+
+def _register_frontend_serving() -> None:
+    assets_dir = DIST / "assets"
+    if assets_dir.exists() and not _mount_exists("/assets"):
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    _register_route("/", "GET", serve_root, include_in_schema=False)
+    _register_route("/{full_path:path}", "GET", serve_spa, include_in_schema=False)
+
+
+def _optional_user_id(request: Request) -> str | None:
+    session_id = request.cookies.get(core_api.AUTH_COOKIE_NAME, "").strip()
+    if not session_id:
+        return None
+    try:
+        user = auth_store.get_user_for_session(core_api.AUTH_DB_PATH, session_id=session_id)
+        return user["id"] if user else None
+    except Exception:
+        return None
+
+
 def chat_storage() -> dict[str, Any]:
     return {"chat_storage": chat_memory.get_storage_status()}
 
 
-def chat(req: ChatRequest) -> dict[str, Any]:
-    return handle_chat_message(req.message, req.conversation_id)
+def chat(req: ChatRequest, request: Request) -> dict[str, Any]:
+    user_id = _optional_user_id(request)
+    return handle_chat_message(req.message, req.conversation_id, user_id=user_id)
 
 
-def list_conversations() -> dict[str, Any]:
-    return {"conversations": chat_memory.list_conversations()}
+def list_conversations(request: Request) -> dict[str, Any]:
+    user_id = _optional_user_id(request)
+    return {"conversations": chat_memory.list_conversations(user_id=user_id)}
 
 
-def create_conversation(req: NewConversationRequest | None = None) -> dict[str, Any]:
+def create_conversation(request: Request, req: NewConversationRequest | None = None) -> dict[str, Any]:
     request_payload = req or NewConversationRequest()
+    user_id = _optional_user_id(request)
     conversation = chat_memory.create_conversation(
         title=request_payload.title,
         metadata=request_payload.metadata,
+        user_id=user_id,
     )
     return {"conversation": conversation}
 
@@ -111,6 +166,8 @@ def get_conversation(conversation_id: str) -> dict[str, Any]:
 
 
 _wrap_core_lifespan()
+_register_frontend_serving()
+_register_route("/docs", "GET", docs_redirect, include_in_schema=False)
 _register_route("/chat/storage", "GET", chat_storage, summary="Inspect chat storage mode")
 _register_route("/chat", "POST", chat, summary="Chat with Genorova")
 _register_route("/conversations", "GET", list_conversations, summary="List stored conversations")
