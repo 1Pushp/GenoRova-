@@ -898,7 +898,8 @@ def _fallback_reference_candidates(disease: str, count: int) -> list[dict[str, A
         seen.add(smiles)
         try:
             payload = _score_smiles_payload(smiles)
-        except HTTPException:
+        except Exception as exc:
+            print(f"[CHAT] Reference fallback skipped: {exc}")
             continue
         fallback_rows.append(
             {
@@ -2253,6 +2254,7 @@ def api_chat(
 ):
     """Accept a natural-language request and route it through Genorova's core logic."""
     message = req.message.strip()
+    print(f"[CHAT] Received: {message[:50]}")
     if not message:
         raise HTTPException(status_code=422, detail="Message cannot be empty.")
 
@@ -2267,8 +2269,12 @@ def api_chat(
         merged_state["requested_target"] = req.target
     mode = _resolve_mode_from_message(message, _normalize_mode(req.mode), merged_state)
     intent = _parse_chat_intent(message)
+    target = _infer_target_context(message)
+    print(f"[CHAT] Intent: {intent}, target: {target['target']}")
     try:
         response = _build_chat_response(intent, mode, message, merged_state)
+        candidates = response.get("generated_candidates") or []
+        print(f"[CHAT] Candidates: {len(candidates)}")
     except HTTPException as exc:
         _json_log(
             logging.WARNING if exc.status_code < 500 else logging.ERROR,
@@ -3432,7 +3438,11 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
     if intent == "optimize":
         base_smiles = resolved_smiles[0] if resolved_smiles else latest_candidate_smiles
         if not base_smiles:
-            generated = _generate_candidates_for_disease(target_bucket, 1)
+            try:
+                generated = _generate_candidates_for_disease(target_bucket, 1)
+            except Exception as exc:
+                print(f"[CHAT] Optimize fallback failed: {exc}")
+                generated = {"molecules": []}
             generated_molecules = generated.get("molecules") or []
             if not generated_molecules:
                 return _build_chat_initializing_response(
@@ -3483,8 +3493,12 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         }
 
     requested_count = _extract_count(message, default=default_count)
-    cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.1)
-    cvae_molecules = _cvae_candidates_from_records(cvae_records, target_context)
+    try:
+        cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.1)
+        cvae_molecules = _cvae_candidates_from_records(cvae_records, target_context)
+    except Exception as exc:
+        print(f"[CHAT] CVAE fallback failed: {exc}")
+        cvae_molecules = []
     if cvae_molecules:
         return _build_cvae_chat_response(
             intent=intent,
@@ -3495,7 +3509,11 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         )
 
     if target_bucket != ACTIVE_DISEASE:
-        fallback_molecules = _fallback_reference_candidates(target_bucket, requested_count)
+        try:
+            fallback_molecules = _fallback_reference_candidates(target_bucket, requested_count)
+        except Exception as exc:
+            print(f"[CHAT] Curated fallback failed: {exc}")
+            fallback_molecules = []
         if fallback_molecules:
             top_candidate = fallback_molecules[0]
             candidate_smiles = top_candidate.get("smiles")
@@ -3572,7 +3590,17 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             requested_count=requested_count,
         )
 
-    generated = _generate_candidates_for_disease(target_bucket, requested_count)
+    try:
+        generated = _generate_candidates_for_disease(target_bucket, requested_count)
+    except Exception as exc:
+        print(f"[CHAT] Active generation fallback failed: {exc}")
+        return _build_chat_initializing_response(
+            intent="generate",
+            mode=mode,
+            message=message,
+            target_context=target_context,
+            requested_count=requested_count,
+        )
     if generated.get("count_returned", 0) == 0:
         if not DB_PATH.exists():
             return _build_chat_initializing_response(
