@@ -54,7 +54,13 @@ async function sendMessage(message, sessionId) {
       mode: 'scientific',
     }),
   })
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }))
+    throw Object.assign(new Error(err.detail || 'Request failed'), {
+      response: r,
+      data: err,
+    })
+  }
   return await r.json()
 }
 
@@ -351,7 +357,9 @@ export default function GenorovaWorkspace() {
     ])
 
     try {
+      console.log('[Chat] Sending:', msg, 'session:', sessionId)
       const data = await sendMessage(msg, sessionId)
+      console.log('[Chat] Response:', data)
 
       /* Update session ID if new */
       if (data.session_id && !sessionId) {
@@ -366,13 +374,27 @@ export default function GenorovaWorkspace() {
         ...prev.slice(0, -1),
         { role: 'assistant', content: response, source },
       ])
-    } catch {
+    } catch (e) {
+      console.error('[Chat] Error:', e.message, e.data)
+      let errorMsg = 'Connection error. '
+      try {
+        if (e.data) {
+          errorMsg = e.data.detail || e.data.message || errorMsg
+        } else if (e.response) {
+          const errData = await e.response.clone().json()
+          errorMsg = errData.detail || errData.message || errorMsg
+        } else {
+          errorMsg = e.message || errorMsg
+        }
+      } catch {
+        errorMsg = e.message || errorMsg
+      }
+
       setMessages((prev) => [
         ...prev.slice(0, -1),
         {
           role: 'assistant',
-          content:
-            'Sorry, I could not process that request. Please check the server connection and try again.',
+          content: `Error: ${errorMsg}\n\nIf this persists, try starting a New Chat.`,
         },
       ])
     }
