@@ -564,6 +564,9 @@ app = FastAPI(
     lifespan    = _app_lifespan,
 )
 
+# Backward-compatible app alias for local diagnostics and older backend imports.
+core_api = app
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
@@ -3412,6 +3415,72 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
             target_context=target_context,
             molecules=cvae_molecules,
         )
+
+    if target_bucket != ACTIVE_DISEASE:
+        trust = _cvae_trust_payload(target_context)
+        trust.update(
+            {
+                "validation_status": "cvae_generation_empty",
+                "confidence_note": (
+                    f"Genorova recognized the {target_label} and attempted the trained CVAE path, "
+                    "but the model did not produce a valid molecule in this run."
+                ),
+                "fallback_used": False,
+                "recommended_next_step": (
+                    "Try generation again, relax constraints, or score a known valid SMILES while the "
+                    "target-specific generation path is being tuned."
+                ),
+            }
+        )
+        return {
+            "intent": "generate",
+            "mode": mode,
+            "message": message,
+            "source": CVAE_SOURCE,
+            "summary": (
+                f"Genorova recognized the {target_label} and tried the trained CVAE generation path, "
+                "but no valid molecules were produced in this run. No active bCA fallback was used for this target."
+            ),
+            "candidate": None,
+            "generated_candidates": [],
+            "trust": trust,
+            "limitations": trust.get("limitations", []),
+            "why": (
+                "The request was routed to the target-aware CVAE path first. Because that path returned no valid "
+                "SMILES, Genorova is reporting an empty result instead of substituting molecules from another program."
+            ),
+            "risks": [
+                "The current CVAE sample did not yield a valid molecule for this request.",
+                "Returning molecules from an unrelated active program would misrepresent the target context.",
+            ],
+            "next_steps": [
+                "Try again with fewer constraints or a slightly higher requested count.",
+                "Score a known valid SMILES for this target while generation is being tuned.",
+                "Use the result as a system availability signal, not as a chemistry conclusion.",
+            ],
+            "warnings": _cvae_warnings(target_context),
+            "follow_up_actions": [
+                {"label": "Retry Generation", "prompt": f"Generate {requested_count} molecules for {target_label}"},
+                {"label": "Score Known Molecule", "prompt": "Score this molecule: CCO"},
+            ],
+            "program_context": {
+                **CVAE_MODEL_CONTEXT,
+                "requested_label": target_label,
+                "requested_target": target_context["target"],
+                "supported_bucket": target_bucket,
+                "reference_drug": target_context.get("reference_drug"),
+                "count_returned": 0,
+                "generation_status": "cvae_generation_empty",
+                "generation_mode": GENERATION_MODE_REAL,
+                "source": CVAE_SOURCE,
+            },
+            "conversation_state": _build_conversation_state(
+                intent="generate",
+                mode=mode,
+                target_label=target_label,
+                candidate_smiles=None,
+            ),
+        }
 
     generated = _generate_candidates_for_disease(target_bucket, requested_count)
     if generated.get("count_returned", 0) == 0:
