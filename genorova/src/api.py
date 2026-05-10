@@ -279,11 +279,62 @@ def _binding_truth_fields(raw_mode: str | None) -> dict[str, str]:
     }
 
 
+def _display_score(value: Any, default: float = 0.0) -> float:
+    """Round public score values for UI display."""
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError):
+        return default
+
+
+def _display_metric(value: Any, digits: int = 2, fallback: str = "N/A") -> str:
+    """Format compact numeric metrics for chat summaries."""
+    try:
+        return f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _grade_from_score(score: Any) -> str:
+    """Convert the public 0-1 score into a clean A/B/C grade."""
+    try:
+        numeric_score = float(score)
+    except (TypeError, ValueError):
+        numeric_score = 0.0
+    if numeric_score > 0.4:
+        return "A"
+    if numeric_score >= 0.1:
+        return "B"
+    return "C"
+
+
+def _grade_from_label(label: Any) -> str | None:
+    """Normalize older rank labels into public A/B/C grades."""
+    normalized = str(label or "").strip().lower()
+    if normalized in {"a", "b", "c"}:
+        return normalized.upper()
+    if "conditional" in normalized or "border" in normalized:
+        return "B"
+    if "provisional" in normalized or normalized == "advance" or normalized.startswith("advance "):
+        return "A"
+    if "low-priority" in normalized or "low priority" in normalized:
+        return "C"
+    return None
+
+
 def _public_candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:
     """Return the API-safe molecule payload with one public score field."""
     public = dict(candidate or {})
     clinical_score = public.get("clinical_score", public.get("rank_score"))
-    public["clinical_score"] = _safe_float(clinical_score, default=0.0)
+    public["clinical_score"] = _display_score(clinical_score)
+    public_grade = (
+        _grade_from_label(public.get("grade"))
+        or _grade_from_label(public.get("rank_label"))
+        or _grade_from_label(public.get("recommendation"))
+        or _grade_from_score(public["clinical_score"])
+    )
+    public["grade"] = public_grade
+    public["rank_label"] = public_grade
 
     raw_mode = public.get("binding_mode") or public.get("docking_mode")
     binding_truth = _binding_truth_fields(raw_mode)
@@ -807,41 +858,22 @@ def _ranking_label(
     candidate: dict | None = None,
 ) -> str:
     """
-    Return the canonical human-readable label for a ranked candidate.
+    Return the clean public A/B/C grade for a ranked candidate.
 
-    Prefers the rank_label already computed by science_evidence.evaluate_candidate
-    (which uses validation.ranking.best_candidate_label).  Falls back to a
-    score-only approximation only when no full candidate dict is available.
-
-    Callers should pass `candidate=` whenever they have the full evaluated dict
-    so that evidence-quality gates are applied, not just a raw score threshold.
+    Older payloads may contain descriptive rank labels; normalize those before
+    falling back to score buckets.
     """
-    # Best path: use the pre-computed rank_label from the canonical ranking module
     if candidate is not None:
-        precomputed = candidate.get("rank_label")
-        if precomputed:
-            return precomputed
-        try:
-            from validation.ranking import best_candidate_label as _bcl
-            return _bcl(candidate)
-        except Exception:
-            pass
+        for label_key in ("grade", "rank_label", "recommendation"):
+            grade = _grade_from_label(candidate.get(label_key))
+            if grade:
+                return grade
+        score = candidate.get("clinical_score", candidate.get("rank_score", score))
 
-    # Fall back to score-bucket approximation (no evidence-quality gates)
-    # These labels match the canonical ranking module labels.
     if score is not None:
-        if score >= 0.65:
-            return "provisional best candidate"
-        if score >= 0.45:
-            return "conditional computational lead"
-        return "low-priority computational result"
+        return _grade_from_score(score)
 
-    normalized = str(recommendation or "").lower()
-    if "provisional" in normalized or "advance" in normalized:
-        return "provisional best candidate"
-    if "conditional" in normalized or "border" in normalized:
-        return "conditional computational lead"
-    return "low-priority computational result"
+    return _grade_from_label(recommendation) or "C"
 
 
 def _trust_block(
@@ -1051,7 +1083,7 @@ def _cvae_recommendation(grade: str, lipinski_pass: bool) -> tuple[str, str]:
         return "conditional_advance", "conditional CVAE-generated lead"
     if normalized_grade == "C":
         return "conditional_advance", "early CVAE-generated optimization candidate"
-    return "reject", "low-priority CVAE-generated result"
+    return "reject", "Grade C CVAE-generated result"
 
 
 def _cvae_candidate_from_row(
@@ -1067,7 +1099,7 @@ def _cvae_candidate_from_row(
     composite_score = _cvae_float(row, "composite_score")
     clinical_score = round(composite_score / 100.0, 4)
     lipinski_pass = _cvae_bool(row.get("lipinski_pass"))
-    grade = str(row.get("grade") or "N/A")
+    grade = _grade_from_score(clinical_score)
     final_decision, recommendation = _cvae_recommendation(grade, lipinski_pass)
     target_label = target_context["label"]
     reference_drug = target_context.get("reference_drug") or ACTIVE_REFERENCE_DRUG
@@ -1142,7 +1174,7 @@ def _cvae_candidate_from_row(
         "model_score": clinical_score,
         "grade": grade,
         "recommendation": recommendation,
-        "rank_label": recommendation,
+        "rank_label": grade,
         "final_decision": final_decision,
         "decision_score": clinical_score,
         "decision_provenance": {
@@ -2768,17 +2800,18 @@ def _decision_overview(score_payload: dict, validation: dict | None = None) -> d
         or validation_block.get("decision_provenance")
         or (score_payload.get("clinical") or {}).get("decision_provenance")
     )
+    decision_score = (
+        score_payload.get("decision_score")
+        or validation_block.get("decision_score")
+        or (decision_provenance or {}).get("decision_score")
+    )
     return {
         "final_decision": (
             score_payload.get("final_decision")
             or validation_block.get("final_decision")
             or (decision_provenance or {}).get("final_decision")
         ),
-        "decision_score": (
-            score_payload.get("decision_score")
-            or validation_block.get("decision_score")
-            or (decision_provenance or {}).get("decision_score")
-        ),
+        "decision_score": _display_score(decision_score),
         "decision_confidence_tier": (
             score_payload.get("decision_confidence_tier")
             or validation_block.get("decision_confidence_tier")
@@ -2913,7 +2946,8 @@ def _candidate_block(score_payload: dict, label: str | None = None) -> dict:
     return {
         "name": label,
         "smiles": score_payload.get("smiles"),
-        "score": score_payload.get("clinical_score"),
+        "score": _display_score(score_payload.get("clinical_score")),
+        "grade": _grade_from_label(score_payload.get("grade")) or _ranking_label(candidate=score_payload),
         "recommendation": score_payload.get("recommendation"),
         "molecule_svg": _molecule_svg(score_payload.get("smiles")),
         "validation_status": score_payload.get("validation_status"),
@@ -3289,8 +3323,10 @@ def _build_cvae_chat_response(
         "message": message,
         "source": CVAE_SOURCE,
         "summary": (
-            f"Generated {len(molecules)} candidates with {CVAE_MODEL_CONTEXT['model']} "
-            f"for the {target_label}. The molecules were ranked with the offline RDKit ADMET screen."
+            f"Generated {len(molecules)} {target_label} candidates using Genorova CVAE.\n"
+            f"Top candidate: Grade {top_candidate.get('grade') or 'C'}, "
+            f"QED {_display_metric(top_candidate.get('qed_score'))}, "
+            f"MW {_display_metric(top_candidate.get('molecular_weight'))} Da"
         ),
         "candidate": _candidate_block(top_candidate, label="Top CVAE-generated candidate"),
         "generated_candidates": _generated_candidates_with_visuals(molecules),
