@@ -969,7 +969,7 @@ def _generation_probe_size(count: int) -> int:
 
 def generate_from_cvae(
     n_molecules: int = 10,
-    temperature: float = 1.1,
+    temperature: float = 1.3,
     mw_max: float = 550,
     qed_min: float = 0.0,
 ) -> list[dict[str, Any]]:
@@ -989,7 +989,15 @@ def generate_from_cvae(
         from genorova.api.main import _generate, _score_batch
 
         requested = max(1, min(int(n_molecules), 50))
-        smiles_list = _generate(requested, temperature)
+        raw_count = min(requested * 5, 100)
+        smiles_list = []
+
+        for temp in [temperature, 1.5, 1.1, 1.7]:
+            batch = _generate(raw_count, temp)
+            smiles_list.extend(batch or [])
+            if len(smiles_list) >= raw_count:
+                break
+
         if not smiles_list:
             return []
 
@@ -3604,7 +3612,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
 
     requested_count = _extract_count(message, default=default_count)
     try:
-        cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.1)
+        cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.3)
         cvae_molecules = _cvae_candidates_from_records(cvae_records, target_context)
     except Exception as exc:
         print(f"[CHAT] CVAE fallback failed: {exc}")
