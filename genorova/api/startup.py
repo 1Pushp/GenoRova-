@@ -4,7 +4,7 @@ from pathlib import Path
 CHECKPOINT_URL  = "https://drive.google.com/uc?id=1QDJxsK0p7wI1pxDtV-mz36YTbPm65jXE"
 CHECKPOINT_PATH = Path(__file__).resolve().parent.parent / "outputs" / "checkpoints" / "best.pt"
 TOKENIZER_PATH  = Path(__file__).resolve().parent.parent / "tokenizer" / "genorova_bpe.json"
-HF_REPO_ID      = os.getenv("GENOROVA_HF_REPO_ID", "1Pushp/genorova-cvae")
+HF_REPO_ID      = os.getenv("GENOROVA_HF_REPO_ID", "pushp1/genorova-cvae")
 
 def download_checkpoint_if_missing():
     if CHECKPOINT_PATH.exists():
