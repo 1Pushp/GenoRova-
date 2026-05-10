@@ -280,11 +280,33 @@ def _binding_truth_fields(raw_mode: str | None) -> dict[str, str]:
 
 
 def _display_score(value: Any, default: float = 0.0) -> float:
-    """Round public score values for UI display."""
+    """Round normalized public score values for UI display."""
     try:
         return round(float(value), 2)
     except (TypeError, ValueError):
         return default
+
+
+def _composite_score_display(value: Any, default: float = 0.0) -> float:
+    """Return CVAE composite score on a 0-100 display scale."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return default
+    if abs(score) <= 1:
+        score *= 100
+    return round(score, 1)
+
+
+def _normalized_score(value: Any, default: float = 0.0) -> float:
+    """Return a 0-1 score for grading from either 0-1 or 0-100 input."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return default
+    if abs(score) > 1:
+        score /= 100
+    return round(score, 4)
 
 
 def _display_metric(value: Any, digits: int = 2, fallback: str = "N/A") -> str:
@@ -295,30 +317,37 @@ def _display_metric(value: Any, digits: int = 2, fallback: str = "N/A") -> str:
         return fallback
 
 
-def _grade_from_score(score: Any) -> str:
-    """Convert the public 0-1 score into a clean A/B/C grade."""
+def get_grade(score: Any) -> str:
+    """Convert a normalized 0-1 score into a clean A/B/C/D grade."""
     try:
         numeric_score = float(score)
     except (TypeError, ValueError):
         numeric_score = 0.0
-    if numeric_score > 0.4:
+    if numeric_score >= 0.7:
         return "A"
-    if numeric_score >= 0.1:
+    if numeric_score >= 0.5:
         return "B"
-    return "C"
+    if numeric_score >= 0.3:
+        return "C"
+    return "D"
+
+
+def _grade_from_score(score: Any) -> str:
+    """Convert a score from either 0-1 or 0-100 scale into A/B/C/D."""
+    return get_grade(_normalized_score(score))
 
 
 def _grade_from_label(label: Any) -> str | None:
-    """Normalize older rank labels into public A/B/C grades."""
+    """Normalize older rank labels into public A/B/C/D grades."""
     normalized = str(label or "").strip().lower()
-    if normalized in {"a", "b", "c"}:
+    if normalized in {"a", "b", "c", "d"}:
         return normalized.upper()
     if "conditional" in normalized or "border" in normalized:
         return "B"
     if "provisional" in normalized or normalized == "advance" or normalized.startswith("advance "):
         return "A"
     if "low-priority" in normalized or "low priority" in normalized:
-        return "C"
+        return "D"
     return None
 
 
@@ -326,7 +355,7 @@ def _public_candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:
     """Return the API-safe molecule payload with one public score field."""
     public = dict(candidate or {})
     clinical_score = public.get("clinical_score", public.get("rank_score"))
-    public["clinical_score"] = _display_score(clinical_score)
+    public["clinical_score"] = _display_score(_normalized_score(clinical_score))
     public_grade = (
         _grade_from_label(public.get("grade"))
         or _grade_from_label(public.get("rank_label"))
@@ -1083,7 +1112,16 @@ def _cvae_recommendation(grade: str, lipinski_pass: bool) -> tuple[str, str]:
         return "conditional_advance", "conditional CVAE-generated lead"
     if normalized_grade == "C":
         return "conditional_advance", "early CVAE-generated optimization candidate"
-    return "reject", "Grade C CVAE-generated result"
+    return "reject", "Grade D CVAE-generated result"
+
+
+def _public_generation_target(target_context: dict[str, Any]) -> str:
+    """Return a compact molecule class for generated-candidate summaries."""
+    if target_context.get("target") == "dpp4":
+        return "DPP-4 inhibitor"
+    if target_context.get("target") == "gyrase":
+        return "Gyrase B antibacterial"
+    return str(target_context.get("label") or "drug-like")
 
 
 def _cvae_candidate_from_row(
@@ -1096,8 +1134,9 @@ def _cvae_candidate_from_row(
     logp = _cvae_float(row, "LogP")
     qed = _cvae_float(row, "QED")
     sa_score = _cvae_float(row, "SA_Score")
-    composite_score = _cvae_float(row, "composite_score")
-    clinical_score = round(composite_score / 100.0, 4)
+    raw_composite_score = _cvae_float(row, "composite_score")
+    composite_score = _composite_score_display(raw_composite_score)
+    clinical_score = _normalized_score(raw_composite_score)
     lipinski_pass = _cvae_bool(row.get("lipinski_pass"))
     grade = _grade_from_score(clinical_score)
     final_decision, recommendation = _cvae_recommendation(grade, lipinski_pass)
@@ -1183,7 +1222,7 @@ def _cvae_candidate_from_row(
             "confidence_tier": "medium",
             "evidence_level": "cvae_generation_rdkit_descriptor_screen",
             "final_decision_reason": (
-                f"{CVAE_MODEL_CONTEXT['model']} produced this valid SMILES and the RDKit composite score is {composite_score:.2f}/100."
+                f"{CVAE_MODEL_CONTEXT['model']} produced this valid SMILES and the RDKit composite score is {composite_score:.1f}/100."
             ),
             "provenance_explanation": "Decision is based on CVAE generation plus RDKit descriptor predictions, not wet-lab evidence.",
         },
@@ -3303,6 +3342,7 @@ def _build_cvae_chat_response(
 ) -> dict[str, Any]:
     """Build the rich chat payload for successful CVAE generation."""
     target_label = target_context["label"]
+    public_target = _public_generation_target(target_context)
     top_candidate = molecules[0]
     candidate_smiles = top_candidate.get("smiles")
     trust = _cvae_trust_payload(target_context)
@@ -3323,10 +3363,10 @@ def _build_cvae_chat_response(
         "message": message,
         "source": CVAE_SOURCE,
         "summary": (
-            f"Generated {len(molecules)} {target_label} candidates using Genorova CVAE.\n"
-            f"Top candidate: Grade {top_candidate.get('grade') or 'C'}, "
+            f"Generated {len(molecules)} {public_target} candidates using {CVAE_MODEL_CONTEXT['model']}. "
+            f"Top candidate: Grade {top_candidate.get('grade') or 'D'}, "
             f"QED {_display_metric(top_candidate.get('qed_score'))}, "
-            f"MW {_display_metric(top_candidate.get('molecular_weight'))} Da"
+            f"MW {_display_metric(top_candidate.get('molecular_weight'), digits=0)} Da."
         ),
         "candidate": _candidate_block(top_candidate, label="Top CVAE-generated candidate"),
         "generated_candidates": _generated_candidates_with_visuals(molecules),
