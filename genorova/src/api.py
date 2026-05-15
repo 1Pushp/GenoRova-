@@ -262,6 +262,9 @@ def _public_url() -> str | None:
 
 
 def _allowed_origins() -> list[str]:
+    production_origins = [
+        "https://genorova.onrender.com",
+    ]
     configured = os.getenv("GENOROVA_ALLOWED_ORIGINS", "").strip()
     if configured:
         origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
@@ -273,6 +276,7 @@ def _allowed_origins() -> list[str]:
         public_url = _public_url()
         if public_url:
             origins.append(public_url)
+    origins.extend(production_origins)
 
     deduped: list[str] = []
     for origin in origins:
@@ -2397,6 +2401,11 @@ def api_chat_session_detail(
     return {"session": _workspace_session_from_store(session)}
 
 
+@app.get("/api/chat/health", summary="Public chat route health check")
+def api_chat_health():
+    return {"ok": True, "route": "/api/chat"}
+
+
 @app.post("/api/chat", summary="Natural-language Genorova chat endpoint")
 def api_chat(
     req: ChatRequest,
@@ -2480,7 +2489,15 @@ def api_chat(
             status_code=500,
             reason=str(exc),
         )
-        raise
+        return JSONResponse(
+            status_code=500,
+            content={
+                "reply": "Backend error while processing chat. Please try again.",
+                "intent": "error",
+                "molecules": [],
+                "metadata": {"error": str(exc)},
+            },
+        )
     response["intent"] = intent
     response["mode"] = mode
     response["session_id"] = session_id

@@ -26,7 +26,13 @@ const DEMOS = [
   'What is the ADMET profile of aspirin?',
 ]
 
-const CHAT_ENDPOINT = '/api/chat'
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin
+const IS_LOCAL_API_BASE = /\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(RAW_API_BASE)
+const IS_LOCAL_PAGE = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+const API_BASE = (
+  IS_LOCAL_API_BASE && !IS_LOCAL_PAGE ? window.location.origin : RAW_API_BASE
+).replace(/\/$/, '')
+const CHAT_ENDPOINT = `${API_BASE}/api/chat`
 
 /* -- API helpers -- */
 async function getUser() {
@@ -46,19 +52,31 @@ async function logout() {
 }
 
 async function sendMessage(message, sessionId) {
-  console.log('[Chat] message submitted', { message, sessionId })
-  console.log('[Chat] endpoint called', { endpoint: CHAT_ENDPOINT, method: 'POST' })
+  const body = {
+    message,
+    session_id: sessionId ?? null,
+    mode: 'chat',
+  }
 
-  const r = await fetch(CHAT_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      message,
-      session_id: sessionId || null,
-      mode: 'scientific',
-    }),
-  })
+  console.log('[Chat] message submitted', { message, sessionId })
+  console.log('[Chat] endpoint called', CHAT_ENDPOINT)
+  console.log('[Chat] sending body', body)
+
+  let r
+  try {
+    r = await fetch(CHAT_ENDPOINT, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    console.error('[Chat] fetch failed', err)
+    throw Object.assign(
+      new Error('Backend request failed. Please check login/session or try again.'),
+      { originalError: err },
+    )
+  }
 
   console.log('[Chat] status code', r.status)
   const payload = await r.json().catch((error) => {
@@ -542,18 +560,16 @@ export default function GenorovaWorkspace() {
       ])
     } catch (e) {
       console.error('[Chat] Error:', e.message, e.data)
-      let errorMsg = 'Connection error. '
+      let errorMsg = 'Backend request failed. Please check login/session or try again.'
       try {
         if (e.data) {
           errorMsg = errorText(e.data.detail || e.data.message, errorMsg)
         } else if (e.response) {
           const errData = await e.response.clone().json()
           errorMsg = errorText(errData.detail || errData.message, errorMsg)
-        } else {
-          errorMsg = e.message || errorMsg
         }
       } catch {
-        errorMsg = e.message || errorMsg
+        errorMsg = 'Backend request failed. Please check login/session or try again.'
       }
 
       setLastError(errorMsg)
@@ -565,8 +581,9 @@ export default function GenorovaWorkspace() {
           error: true,
         },
       ])
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const firstName = user?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'Researcher'
