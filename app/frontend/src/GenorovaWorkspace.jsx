@@ -27,11 +27,7 @@ const DEMOS = [
 ]
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin
-const IS_LOCAL_API_BASE = /\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(RAW_API_BASE)
-const IS_LOCAL_PAGE = ['localhost', '127.0.0.1'].includes(window.location.hostname)
-const API_BASE = (
-  IS_LOCAL_API_BASE && !IS_LOCAL_PAGE ? window.location.origin : RAW_API_BASE
-).replace(/\/$/, '')
+const API_BASE = RAW_API_BASE.replace(/\/$/, '')
 const CHAT_ENDPOINT = `${API_BASE}/api/chat`
 
 /* -- API helpers -- */
@@ -52,47 +48,65 @@ async function logout() {
 }
 
 async function sendMessage(message, sessionId) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 60000)
+
   const body = {
     message,
     session_id: sessionId ?? null,
     mode: 'chat',
   }
 
-  console.log('[Chat] message submitted', { message, sessionId })
-  console.log('[Chat] endpoint called', CHAT_ENDPOINT)
-  console.log('[Chat] sending body', body)
+  sendMessage.lastEndpoint = CHAT_ENDPOINT
+  sendMessage.lastStatusCode = null
+  sendMessage.lastError = null
 
-  let r
   try {
-    r = await fetch(CHAT_ENDPOINT, {
+    console.log('[Chat] endpoint called', CHAT_ENDPOINT)
+    console.log('[Chat] sending body', body)
+
+    const r = await fetch(CHAT_ENDPOINT, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: controller.signal,
     })
+
+    sendMessage.lastStatusCode = r.status
+    console.log('[Chat] status code', r.status)
+
+    const text = await r.text()
+    let payload = {}
+
+    try {
+      payload = text ? JSON.parse(text) : {}
+    } catch {
+      payload = { reply: text }
+    }
+
+    console.log('[Chat] response JSON', payload)
+
+    if (!r.ok) {
+      throw Object.assign(
+        new Error(
+          payload?.detail ||
+            payload?.reply ||
+            payload?.error ||
+            `Chat request failed with status ${r.status}`,
+        ),
+        { response: r, data: payload, statusCode: r.status, endpoint: CHAT_ENDPOINT },
+      )
+    }
+
+    return payload
   } catch (err) {
+    sendMessage.lastError = String(err?.message || err)
     console.error('[Chat] fetch failed', err)
-    throw Object.assign(
-      new Error('Backend request failed. Please check login/session or try again.'),
-      { originalError: err },
-    )
+    throw err
+  } finally {
+    clearTimeout(timeout)
   }
-
-  console.log('[Chat] status code', r.status)
-  const payload = await r.json().catch((error) => {
-    console.error('[Chat] response JSON parse error', error)
-    return { detail: `HTTP ${r.status}` }
-  })
-  console.log('[Chat] response JSON', payload)
-
-  if (!r.ok) {
-    console.error('[Chat] error details', { status: r.status, payload })
-    throw Object.assign(new Error(errorText(payload.detail || payload.message, 'Request failed')), {
-      response: r,
-      data: payload,
-    })
-  }
-  return payload
 }
 
 async function getSessions() {
@@ -139,6 +153,10 @@ function errorText(value, fallback = 'Request failed') {
     return value.message || value.detail || value.error || JSON.stringify(value)
   }
   return String(value)
+}
+
+function makeMessageId(offset = 0) {
+  return globalThis.crypto?.randomUUID?.() || String(Date.now() + offset)
 }
 
 /* -- Format AI response into readable text -- */
@@ -470,6 +488,11 @@ export default function GenorovaWorkspace() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [lastError, setLastError] = useState(null)
+  const [chatDebug, setChatDebug] = useState({
+    lastEndpoint: CHAT_ENDPOINT,
+    lastStatusCode: null,
+    lastError: null,
+  })
   const [sidebarOpen, setSidebar] = useState(true)
   const bottomRef = useRef(null)
 
@@ -524,65 +547,95 @@ export default function GenorovaWorkspace() {
   }
 
   /* Send message */
-  const send = async (text) => {
-    const msg = text || input.trim()
-    if (!msg || loading) return
+  const send = async (overrideText) => {
+    const text = String(typeof overrideText === 'string' ? overrideText : input).trim()
+    if (!text || loading) return
+
+    const userMessage = {
+      id: makeMessageId(),
+      role: 'user',
+      content: text,
+      userName: user?.name || user?.email || 'You',
+    }
+
+    setMessages((prev) => [...prev, userMessage])
     setInput('')
     setLoading(true)
     setLastError(null)
-
-    const userName = user?.name || user?.email || 'You'
-
-    setMessages((prev) => [
-      ...prev,
-      { role: 'user', content: msg, userName },
-      { role: 'assistant', content: '', loading: true },
-    ])
+    setChatDebug({
+      lastEndpoint: CHAT_ENDPOINT,
+      lastStatusCode: null,
+      lastError: null,
+    })
 
     try {
-      console.log('[Chat] Sending:', msg, 'session:', sessionId)
-      const data = await sendMessage(msg, sessionId)
-      console.log('[Chat] Response:', data)
+      console.log('[Chat] submit message', text)
 
-      /* Update session ID if new */
-      if (data.session_id && !sessionId) {
-        setSessionId(data.session_id)
+      const payload = await sendMessage(text, sessionId)
+
+      console.log('[Chat] response payload', payload)
+
+      const reply =
+        payload?.reply ||
+        payload?.message ||
+        payload?.response ||
+        payload?.answer ||
+        'No response returned from GenorovaAI.'
+
+      const assistantMessage = {
+        id: makeMessageId(1),
+        role: 'assistant',
+        content: reply,
+        intent: payload?.intent || 'general',
+        molecules: payload?.molecules || extractMolecules(payload),
+        metadata: payload?.metadata || {},
+        payload,
+      }
+
+      setMessages((prev) => [...prev, assistantMessage])
+
+      if (payload?.metadata?.session_id) {
+        setSessionId(payload.metadata.session_id)
+        getSessions().then(setSessions)
+      } else if (payload?.session_id && !sessionId) {
+        setSessionId(payload.session_id)
         getSessions().then(setSessions)
       }
 
-      const response = formatResponse(data)
-      const molecules = extractMolecules(data)
-      const source = data.source || data.program_context?.model || null
-
-      setMessages((prev) => [
-        ...prev.slice(0, -1),
-        { role: 'assistant', content: response, source, payload: data, molecules },
-      ])
+      setChatDebug({
+        lastEndpoint: sendMessage.lastEndpoint || CHAT_ENDPOINT,
+        lastStatusCode: sendMessage.lastStatusCode ?? null,
+        lastError: null,
+      })
     } catch (e) {
-      console.error('[Chat] Error:', e.message, e.data)
-      let errorMsg = 'Backend request failed. Please check login/session or try again.'
-      try {
-        if (e.data) {
-          errorMsg = errorText(e.data.detail || e.data.message, errorMsg)
-        } else if (e.response) {
-          const errData = await e.response.clone().json()
-          errorMsg = errorText(errData.detail || errData.message, errorMsg)
-        }
-      } catch {
-        errorMsg = 'Backend request failed. Please check login/session or try again.'
-      }
+      console.error('[Chat] error', e)
+      const errorMsg =
+        'Backend request failed. Please check login/session, API endpoint, or Render deployment logs.'
 
       setLastError(errorMsg)
+      setChatDebug({
+        lastEndpoint: e.endpoint || sendMessage.lastEndpoint || CHAT_ENDPOINT,
+        lastStatusCode: e.statusCode || sendMessage.lastStatusCode || null,
+        lastError: String(e?.message || e),
+      })
       setMessages((prev) => [
-        ...prev.slice(0, -1),
+        ...prev,
         {
+          id: makeMessageId(2),
           role: 'assistant',
-          content: `Error: ${errorMsg}\n\nIf this persists, try starting a New Chat.`,
+          content: errorMsg,
+          intent: 'error',
+          molecules: [],
+          metadata: { error: String(e?.message || e) },
           error: true,
         },
       ])
     } finally {
       setLoading(false)
+      setChatDebug((prev) => ({
+        ...prev,
+        lastEndpoint: prev.lastEndpoint || CHAT_ENDPOINT,
+      }))
     }
   }
 
@@ -641,6 +694,7 @@ export default function GenorovaWorkspace() {
 
           <div style={{ padding: '12px 12px 6px' }}>
             <button
+              type="button"
               onClick={newChat}
               style={{
                 width: '100%',
@@ -687,7 +741,8 @@ export default function GenorovaWorkspace() {
             {sessions.map((s) => {
               const sid = s.id || s.session_id
               return (
-                <button
+                  <button
+                  type="button"
                   key={sid}
                   onClick={() => loadSession(sid)}
                   style={{
@@ -791,6 +846,7 @@ export default function GenorovaWorkspace() {
               </div>
             </div>
             <button
+              type="button"
               onClick={logout}
               title="Log out"
               style={{
@@ -831,6 +887,7 @@ export default function GenorovaWorkspace() {
             }}
           >
             <button
+              type="button"
               onClick={() => setSidebar((o) => !o)}
               style={{
                 background: 'transparent',
@@ -933,6 +990,7 @@ export default function GenorovaWorkspace() {
                 >
                   {DEMOS.map((d) => (
                     <button
+                      type="button"
                       key={d}
                       onClick={() => send(d)}
                       style={{
@@ -1011,6 +1069,28 @@ export default function GenorovaWorkspace() {
             <div
               style={{
                 maxWidth: 760,
+                margin: '0 auto 10px',
+                border: `1px solid ${C.border}`,
+                background: C.lgrey,
+                color: C.grey,
+                borderRadius: 10,
+                padding: '8px 10px',
+                display: 'grid',
+                gap: 4,
+                fontSize: 11,
+                lineHeight: 1.4,
+              }}
+            >
+              <div>
+                <strong style={{ color: C.blue2 }}>Debug</strong> loading={String(loading)}
+              </div>
+              <div>endpoint={chatDebug.lastEndpoint || CHAT_ENDPOINT}</div>
+              <div>status={chatDebug.lastStatusCode ?? 'n/a'}</div>
+              <div>error={chatDebug.lastError || 'none'}</div>
+            </div>
+            <div
+              style={{
+                maxWidth: 760,
                 margin: '0 auto',
                 display: 'flex',
                 gap: 10,
@@ -1048,7 +1128,8 @@ export default function GenorovaWorkspace() {
                 }}
               />
               <button
-                onClick={() => send()}
+                type="button"
+                onClick={send}
                 disabled={loading || !input.trim()}
                 style={{
                   width: 36,

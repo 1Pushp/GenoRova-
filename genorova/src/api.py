@@ -90,6 +90,12 @@ GENERATION_SAMPLE_FLOOR = 40
 GENERATION_SAMPLE_CAP = 120
 GENERATION_PROBE_FLOOR = 20
 GENERATION_PROBE_CAP = 24
+CHAT_ENABLE_DIRECT_CVAE = os.getenv("GENOROVA_CHAT_ENABLE_CVAE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 STARTUP_STATE: dict[str, Any] = {
     "initialized": False,
     "started_at": None,
@@ -1469,7 +1475,7 @@ def _attempt_runtime_generation(disease: str, count: int) -> tuple[list[dict[str
     }
 
 
-def _generate_candidates_for_disease(disease: str, count: int) -> dict:
+def _generate_candidates_for_disease(disease: str, count: int, *, allow_runtime: bool = True) -> dict:
     """Shared generation logic used by both REST and chat endpoints."""
     disease = disease.lower()
     if disease not in ("diabetes", "infection"):
@@ -1502,7 +1508,19 @@ def _generate_candidates_for_disease(disease: str, count: int) -> dict:
             ),
         }
 
-    live_rows, generation_diagnostics = _attempt_runtime_generation(disease, count)
+    if allow_runtime:
+        live_rows, generation_diagnostics = _attempt_runtime_generation(disease, count)
+    else:
+        live_rows = []
+        generation_diagnostics = {
+            "attempted": False,
+            "selected_backend": None,
+            "selected_backend_label": None,
+            "sample_size": 0,
+            "attempts": [],
+            "failure_reason": "Live generation skipped for responsive chat; use /generate for full runtime generation.",
+            "disease": disease,
+        }
     rows = live_rows
     source_type = "runtime_model_generation"
     generation_status = "runtime_model_generation"
@@ -2423,7 +2441,15 @@ def api_chat(
         prompt_preview=message[:160],
     )
     if not message:
-        raise HTTPException(status_code=422, detail="Message cannot be empty.")
+        return JSONResponse(
+            status_code=422,
+            content={
+                "reply": "Message cannot be empty.",
+                "intent": "error",
+                "molecules": [],
+                "metadata": {"error": "Message cannot be empty."},
+            },
+        )
 
     session_id = _get_or_create_session_id(req.session_id, current_user)
     merged_state = _merge_state_sources(
@@ -2448,7 +2474,7 @@ def api_chat(
         target=target["target"],
     )
     try:
-        response = _build_chat_response(intent, mode, message, merged_state)
+        response = _build_chat_response_with_timeout(intent, mode, message, merged_state)
         molecules = _chat_response_molecules(response)
         program_context = response.get("program_context") or {}
         generation_status = (
@@ -2469,6 +2495,7 @@ def api_chat(
             molecule_count=len(molecules),
         )
     except HTTPException as exc:
+        detail = str(exc.detail)
         _json_log(
             logging.WARNING if exc.status_code < 500 else logging.ERROR,
             "chat_request_failed",
@@ -2476,9 +2503,21 @@ def api_chat(
             intent=intent,
             mode=mode,
             status_code=exc.status_code,
-            reason=str(exc.detail),
+            reason=detail,
         )
-        raise
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "reply": detail,
+                "intent": "error",
+                "molecules": [],
+                "metadata": {
+                    "error": detail,
+                    "requested_intent": intent,
+                    "mode": mode,
+                },
+            },
+        )
     except Exception as exc:
         _json_log(
             logging.ERROR,
@@ -2498,8 +2537,8 @@ def api_chat(
                 "metadata": {"error": str(exc)},
             },
         )
-    response["intent"] = intent
-    response["mode"] = mode
+    response["intent"] = response.get("intent") or intent
+    response["mode"] = response.get("mode") or mode
     response["session_id"] = session_id
     response["history_window"] = req.history[-6:]
     response["generated_at"] = datetime.now().isoformat()
@@ -3641,7 +3680,7 @@ def _build_3d_prompt_response(message: str, mode: str, target_context: dict[str,
         "mode": mode,
         "message": message,
         "reply": (
-            "Here is a docking-ready prompt template you can paste into a 3D visualization or docking workflow.\n\n"
+            "Here is a 3D docking prompt you can paste into a visualization or docking workflow.\n\n"
             f"{prompt_template}"
         ),
         "summary": prompt_template,
@@ -3734,6 +3773,49 @@ def _chat_reply_text(response: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return "GenorovaAI processed the request, but no text response was produced."
+
+
+def _chat_generation_error_response(message: str, mode: str, error: str) -> dict[str, Any]:
+    """Return the stable chat shape when generation cannot complete inside chat."""
+    reply = (
+        "I could not generate molecules right now, but the chat route is working. "
+        "Please try again or check model logs."
+    )
+    return {
+        "reply": reply,
+        "summary": reply,
+        "intent": "error",
+        "mode": mode,
+        "message": message,
+        "molecules": [],
+        "generated_candidates": [],
+        "metadata": {"error": error},
+        "source": "chat_generation_guard",
+        "program_context": {
+            "generation_status": "chat_generation_error",
+            "error": error,
+        },
+        "conversation_state": {},
+    }
+
+
+def _build_chat_response_with_timeout(intent: str, mode: str, message: str, state: dict[str, Any]) -> dict:
+    """Build chat responses while keeping generation failures inside stable JSON."""
+    try:
+        return _build_chat_response(intent, mode, message, state)
+    except Exception as exc:
+        if intent != "generate":
+            raise
+        error = str(exc)
+        print(f"[CHAT] Generation failed: {error}")
+        _json_log(
+            logging.ERROR,
+            "chat_generation_failed",
+            intent=intent,
+            mode=mode,
+            reason=error,
+        )
+        return _chat_generation_error_response(message, mode, error)
 
 
 def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, Any]) -> dict:
@@ -3870,7 +3952,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         base_smiles = resolved_smiles[0] if resolved_smiles else latest_candidate_smiles
         if not base_smiles:
             try:
-                generated = _generate_candidates_for_disease(target_bucket, 1)
+                generated = _generate_candidates_for_disease(target_bucket, 1, allow_runtime=False)
             except Exception as exc:
                 print(f"[CHAT] Optimize fallback failed: {exc}")
                 generated = {"molecules": []}
@@ -3924,12 +4006,14 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         }
 
     requested_count = _extract_count(message, default=default_count)
-    try:
-        cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.3)
-        cvae_molecules = _cvae_candidates_from_records(cvae_records, target_context)
-    except Exception as exc:
-        print(f"[CHAT] CVAE fallback failed: {exc}")
-        cvae_molecules = []
+    cvae_molecules = []
+    if CHAT_ENABLE_DIRECT_CVAE:
+        try:
+            cvae_records = generate_from_cvae(n_molecules=requested_count, temperature=1.3)
+            cvae_molecules = _cvae_candidates_from_records(cvae_records, target_context)
+        except Exception as exc:
+            print(f"[CHAT] CVAE fallback failed: {exc}")
+            cvae_molecules = []
     if cvae_molecules:
         return _build_cvae_chat_response(
             intent=intent,
@@ -4022,7 +4106,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         )
 
     try:
-        generated = _generate_candidates_for_disease(target_bucket, requested_count)
+        generated = _generate_candidates_for_disease(target_bucket, requested_count, allow_runtime=False)
     except Exception as exc:
         print(f"[CHAT] Active generation fallback failed: {exc}")
         return _build_chat_initializing_response(
