@@ -334,6 +334,7 @@ function MoleculeCards({ molecules }) {
 /* -- Message bubble -- */
 function Message({ msg }) {
   const isUser = msg.role === 'user'
+  const isTyping = msg.typing || msg.loading
 
   return (
     <div
@@ -372,21 +373,33 @@ function Message({ msg }) {
           boxShadow: '0 1px 4px rgba(15,45,110,0.06)',
         }}
       >
-        {msg.loading ? (
+        {isTyping ? (
           <div
             style={{
               display: 'flex',
-              gap: 6,
+              gap: 8,
               alignItems: 'center',
-              padding: '4px 0',
+              color: C.grey,
+              fontSize: 13,
+              lineHeight: 1.5,
+              minWidth: 150,
             }}
           >
+            <span>Genorova is thinking</span>
+            <span
+              aria-label="Genorova is thinking"
+              style={{
+                display: 'inline-flex',
+                gap: 5,
+                alignItems: 'center',
+              }}
+            >
             {[0, 1, 2].map((i) => (
               <div
                 key={i}
                 style={{
-                  width: 7,
-                  height: 7,
+                  width: 6,
+                  height: 6,
                   borderRadius: '50%',
                   background: C.blue2,
                   opacity: 0.4,
@@ -394,6 +407,7 @@ function Message({ msg }) {
                 }}
               />
             ))}
+            </span>
           </div>
         ) : (
           <div
@@ -410,7 +424,7 @@ function Message({ msg }) {
             )}
           </div>
         )}
-        {!msg.loading && msg.error && (
+        {!isTyping && msg.error && (
           <div
             style={{
               marginTop: 10,
@@ -427,8 +441,8 @@ function Message({ msg }) {
             response JSON, and error details.
           </div>
         )}
-        {!msg.loading && !isUser && <MoleculeCards molecules={msg.molecules} />}
-        {!msg.loading && msg.source && (
+        {!isTyping && !isUser && <MoleculeCards molecules={msg.molecules} />}
+        {!isTyping && msg.source && (
           <div
             style={{
               marginTop: 6,
@@ -551,14 +565,21 @@ export default function GenorovaWorkspace() {
     const text = String(typeof overrideText === 'string' ? overrideText : input).trim()
     if (!text || loading) return
 
+    const typingId = 'assistant-typing'
     const userMessage = {
       id: makeMessageId(),
       role: 'user',
       content: text,
       userName: user?.name || user?.email || 'You',
     }
+    const typingMessage = {
+      id: typingId,
+      role: 'assistant',
+      content: '',
+      typing: true,
+    }
 
-    setMessages((prev) => [...prev, userMessage])
+    setMessages((prev) => [...prev, userMessage, typingMessage])
     setInput('')
     setLoading(true)
     setLastError(null)
@@ -592,7 +613,10 @@ export default function GenorovaWorkspace() {
         payload,
       }
 
-      setMessages((prev) => [...prev, assistantMessage])
+      setMessages((prev) => [
+        ...prev.filter((message) => message.id !== typingId),
+        assistantMessage,
+      ])
 
       if (payload?.metadata?.session_id) {
         setSessionId(payload.metadata.session_id)
@@ -619,7 +643,7 @@ export default function GenorovaWorkspace() {
         lastError: String(e?.message || e),
       })
       setMessages((prev) => [
-        ...prev,
+        ...prev.filter((message) => message.id !== typingId),
         {
           id: makeMessageId(2),
           role: 'assistant',
@@ -1066,28 +1090,6 @@ export default function GenorovaWorkspace() {
                 Chat request failed: {lastError}
               </div>
             )}
-            <div
-              style={{
-                maxWidth: 760,
-                margin: '0 auto 10px',
-                border: `1px solid ${C.border}`,
-                background: C.lgrey,
-                color: C.grey,
-                borderRadius: 10,
-                padding: '8px 10px',
-                display: 'grid',
-                gap: 4,
-                fontSize: 11,
-                lineHeight: 1.4,
-              }}
-            >
-              <div>
-                <strong style={{ color: C.blue2 }}>Debug</strong> loading={String(loading)}
-              </div>
-              <div>endpoint={chatDebug.lastEndpoint || CHAT_ENDPOINT}</div>
-              <div>status={chatDebug.lastStatusCode ?? 'n/a'}</div>
-              <div>error={chatDebug.lastError || 'none'}</div>
-            </div>
             <div
               style={{
                 maxWidth: 760,
