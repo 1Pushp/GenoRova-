@@ -66,6 +66,7 @@ ROOT_DIR      = Path(__file__).parent.parent
 OUTPUT_DIR    = ROOT_DIR / "outputs"
 GENERATED_DIR = OUTPUT_DIR / "generated"
 MODELS_DIR    = OUTPUT_DIR / "models"
+CHECKPOINT_PATH = OUTPUT_DIR / "checkpoints" / "best.pt"
 DB_PATH       = OUTPUT_DIR / "genorova_memory.db"
 REPORT_PATH   = OUTPUT_DIR / "genorova_report.html"
 FRONTEND_DIST_DIR = ROOT_DIR.parent / "app" / "frontend" / "dist"
@@ -96,10 +97,29 @@ STARTUP_STATE: dict[str, Any] = {
     "warnings": [],
 }
 CVAE_SOURCE = "genorova-cvae-v1"
+
+
+def _read_checkpoint_meta(path: str) -> dict:
+    import torch, os
+
+    if not os.path.exists(path):
+        return {"epoch": None, "val_loss": None, "loaded": False}
+    try:
+        ckpt = torch.load(path, weights_only=False, map_location="cpu")
+        return {
+            "epoch": ckpt.get("epoch"),
+            "val_loss": ckpt.get("val_loss"),
+            "loaded": True,
+        }
+    except Exception as e:
+        return {"epoch": None, "val_loss": None, "loaded": False, "error": str(e)}
+
+
+_CHECKPOINT_META = _read_checkpoint_meta(str(CHECKPOINT_PATH))
 CVAE_MODEL_CONTEXT = {
     "model": "Genorova CVAE v1.0",
-    "epoch": 19,
-    "val_loss": 0.9786,
+    "epoch": _CHECKPOINT_META.get("epoch"),
+    "val_loss": _CHECKPOINT_META.get("val_loss"),
     "snn_test": 0.611,
     "benchmark": "Beats REINVENT 0.58 on SNN/Test",
 }
@@ -218,6 +238,10 @@ def _default_chat_db_path() -> Path:
 
 
 CHAT_DB_PATH = _default_chat_db_path()
+
+# Legacy compatibility for older smoke tests that cleared the former in-memory
+# chat cache. Runtime chat state now lives in chat_store/SQLite.
+CHAT_SESSION_MEMORY: dict[str, Any] = {}
 
 
 def _json_log(level: int, event: str, **fields: Any) -> None:
@@ -1698,7 +1722,11 @@ def _get_or_create_session_id(session_id: str | None, current_user: dict[str, st
     """Return a stable chat-session identifier scoped to the current user."""
     if session_id and session_id.strip():
         candidate = session_id.strip()
-        stored_session = chat_store.get_session(CHAT_DB_PATH, session_id=candidate)
+        try:
+            stored_session = chat_store.get_session(CHAT_DB_PATH, session_id=candidate)
+        except Exception as exc:
+            _json_log(logging.WARNING, "chat_session_lookup_failed", session_id=candidate, error=str(exc))
+            stored_session = None
         if stored_session is None or stored_session.get("user_id") == current_user["id"]:
             return candidate
     return f"session-{uuid.uuid4().hex}"
@@ -1706,11 +1734,15 @@ def _get_or_create_session_id(session_id: str | None, current_user: dict[str, st
 
 def _get_session_state(session_id: str, current_user: dict[str, str]) -> dict[str, Any]:
     """Load persisted conversation state for the current user and session."""
-    stored_session = chat_store.get_session(
-        CHAT_DB_PATH,
-        session_id=session_id,
-        user_id=current_user["id"],
-    )
+    try:
+        stored_session = chat_store.get_session(
+            CHAT_DB_PATH,
+            session_id=session_id,
+            user_id=current_user["id"],
+        )
+    except Exception as exc:
+        _json_log(logging.WARNING, "chat_session_state_load_failed", session_id=session_id, error=str(exc))
+        return {}
     return dict(stored_session.get("state") or {}) if stored_session else {}
 
 
@@ -1776,44 +1808,53 @@ def _persist_chat_response(
     user_message: str,
     response: dict[str, Any],
 ) -> None:
-    session_title = _session_title_from_message(user_message)
-    conversation_state = dict(response.get("conversation_state") or {})
-    chat_store.ensure_session(
-        CHAT_DB_PATH,
-        session_id=session_id,
-        user=current_user,
-        title=session_title,
-        state=conversation_state,
-        metadata={"latest_intent": response.get("intent"), "latest_mode": response.get("mode")},
-    )
-    chat_store.add_message(
-        CHAT_DB_PATH,
-        session_id=session_id,
-        user=current_user,
-        role="user",
-        content=user_message,
-        metadata={"kind": "prompt"},
-        title=session_title,
-    )
-    assistant_summary = str(response.get("summary") or response.get("message") or "Response ready.")
-    chat_store.add_message(
-        CHAT_DB_PATH,
-        session_id=session_id,
-        user=current_user,
-        role="assistant",
-        content=assistant_summary,
-        payload=response,
-        metadata={"kind": "response"},
-        title=session_title,
-    )
-    chat_store.update_session_state(
-        CHAT_DB_PATH,
-        session_id=session_id,
-        user=current_user,
-        state=conversation_state,
-        title=session_title,
-        metadata={"latest_intent": response.get("intent"), "latest_mode": response.get("mode")},
-    )
+    try:
+        session_title = _session_title_from_message(user_message)
+        conversation_state = dict(response.get("conversation_state") or {})
+        chat_store.ensure_session(
+            CHAT_DB_PATH,
+            session_id=session_id,
+            user=current_user,
+            title=session_title,
+            state=conversation_state,
+            metadata={"latest_intent": response.get("intent"), "latest_mode": response.get("mode")},
+        )
+        chat_store.add_message(
+            CHAT_DB_PATH,
+            session_id=session_id,
+            user=current_user,
+            role="user",
+            content=user_message,
+            metadata={"kind": "prompt"},
+            title=session_title,
+        )
+        assistant_summary = str(response.get("summary") or response.get("message") or "Response ready.")
+        chat_store.add_message(
+            CHAT_DB_PATH,
+            session_id=session_id,
+            user=current_user,
+            role="assistant",
+            content=assistant_summary,
+            payload=response,
+            metadata={"kind": "response"},
+            title=session_title,
+        )
+        chat_store.update_session_state(
+            CHAT_DB_PATH,
+            session_id=session_id,
+            user=current_user,
+            state=conversation_state,
+            title=session_title,
+            metadata={"latest_intent": response.get("intent"), "latest_mode": response.get("mode")},
+        )
+    except Exception as exc:
+        _json_log(
+            logging.WARNING,
+            "chat_persist_failed_response_returned",
+            session_id=session_id,
+            user_id=current_user.get("id"),
+            error=str(exc),
+        )
 
 
 def _molecule_svg(smiles: str | None, width: int = 360, height: int = 220) -> str | None:
@@ -2363,7 +2404,15 @@ def api_chat(
 ):
     """Accept a natural-language request and route it through Genorova's core logic."""
     message = req.message.strip()
-    print(f"[CHAT] Received: {message[:50]}")
+    print(f"[CHAT] Route hit: POST /api/chat user={current_user['id']}")
+    print(f"[CHAT] Received prompt: {message[:120]}")
+    _json_log(
+        logging.INFO,
+        "chat_route_hit",
+        user_id=current_user["id"],
+        session_id=req.session_id,
+        prompt_preview=message[:160],
+    )
     if not message:
         raise HTTPException(status_code=422, detail="Message cannot be empty.")
 
@@ -2379,11 +2428,37 @@ def api_chat(
     mode = _resolve_mode_from_message(message, _normalize_mode(req.mode), merged_state)
     intent = _parse_chat_intent(message)
     target = _infer_target_context(message)
-    print(f"[CHAT] Intent: {intent}, target: {target['target']}")
+    print(f"[CHAT] Selected intent: {intent}, target: {target['target']}")
+    _json_log(
+        logging.INFO,
+        "chat_intent_selected",
+        user_id=current_user["id"],
+        session_id=session_id,
+        intent=intent,
+        mode=mode,
+        target=target["target"],
+    )
     try:
         response = _build_chat_response(intent, mode, message, merged_state)
-        candidates = response.get("generated_candidates") or []
-        print(f"[CHAT] Candidates: {len(candidates)}")
+        molecules = _chat_response_molecules(response)
+        program_context = response.get("program_context") or {}
+        generation_status = (
+            program_context.get("generation_status")
+            or response.get("source")
+            or response.get("intent")
+            or "completed"
+        )
+        print(f"[CHAT] Model/generation status: {generation_status}")
+        print(f"[CHAT] Molecules returned: {len(molecules)}")
+        _json_log(
+            logging.INFO,
+            "chat_model_generation_status",
+            user_id=current_user["id"],
+            session_id=session_id,
+            intent=intent,
+            generation_status=generation_status,
+            molecule_count=len(molecules),
+        )
     except HTTPException as exc:
         _json_log(
             logging.WARNING if exc.status_code < 500 else logging.ERROR,
@@ -2411,6 +2486,29 @@ def api_chat(
     response["session_id"] = session_id
     response["history_window"] = req.history[-6:]
     response["generated_at"] = datetime.now().isoformat()
+    response["reply"] = _chat_reply_text(response)
+    response["molecules"] = _chat_response_molecules(response)
+    response["metadata"] = {
+        **(response.get("metadata") or {}),
+        "session_id": session_id,
+        "mode": mode,
+        "source": response.get("source"),
+        "program_context": response.get("program_context", {}),
+        "conversation_state": response.get("conversation_state", {}),
+        "history_window": response["history_window"],
+        "generated_at": response["generated_at"],
+        "molecule_count": len(response["molecules"]),
+    }
+    print(f"[CHAT] Returned response: intent={response['intent']} molecules={len(response['molecules'])}")
+    _json_log(
+        logging.INFO,
+        "chat_response_returned",
+        user_id=current_user["id"],
+        session_id=session_id,
+        intent=response["intent"],
+        molecule_count=len(response["molecules"]),
+        reply_preview=response["reply"][:180],
+    )
     _persist_chat_response(
         session_id=session_id,
         current_user=current_user,
@@ -2574,19 +2672,21 @@ def _infer_disease_area(message: str) -> tuple[str, str]:
 def _parse_chat_intent(message: str) -> str:
     """Infer the high-level user intent from a natural-language request."""
     lowered = message.lower()
+    if any(word in lowered for word in ("3d", "docking", "protein", "structure", "visualization", "visualisation")):
+        return "suggest_3d_prompt"
     if "why is this better" in lowered or "why is it better" in lowered:
         return "compare"
     if any(word in lowered for word in ("compare", "versus", "vs ", "difference between")):
         return "compare"
     if any(word in lowered for word in ("safer", "optimize", "optimise", "improve", "reduce toxicity", "less toxic", "toxic", "analog", "oral delivery")):
         return "optimize"
+    if any(word in lowered for word in ("score", "admet", "lipinski", "qed", "profile", "analyze", "analyse", "evaluate")):
+        return "score"
+    if any(word in lowered for word in ("generate", "molecule", "inhibitor", "candidate", "design", "find", "discover")):
+        return "generate"
     if any(word in lowered for word in ("explain", "what is", "describe", "tell me about")):
         return "explain"
-    if any(word in lowered for word in ("score", "profile", "analyze", "analyse", "evaluate")):
-        return "score"
-    if any(word in lowered for word in ("generate", "design", "find", "suggest", "candidate")):
-        return "generate"
-    return "generate"
+    return "general"
 
 
 def _resolve_reference_smiles(message: str, state: dict[str, Any]) -> list[str]:
@@ -3505,6 +3605,120 @@ def _non_smiles_explanation_response(message: str, mode: str) -> dict[str, Any]:
     }
 
 
+def _build_3d_prompt_response(message: str, mode: str, target_context: dict[str, Any]) -> dict[str, Any]:
+    """Return a docking/3D prompt template without pretending a docking run happened."""
+    target_label = target_context["label"]
+    target_name = target_context["target"].upper()
+    reference_drug = target_context.get("reference_drug") or "a relevant reference ligand"
+    prompt_template = (
+        f"Prepare a 3D docking study for the {target_label}. "
+        f"Target protein: {target_name}; use a high-quality experimental PDB structure when available. "
+        "Ligand: <paste candidate SMILES here>. "
+        "Steps: generate a 3D conformer, assign protonation at pH 7.4, minimize geometry, "
+        f"dock into the active site using {reference_drug} as the comparator, report binding pose, "
+        "key residues, hydrogen bonds, hydrophobic contacts, docking score, and uncertainty. "
+        "State clearly that this is computational prioritization only and requires experimental validation."
+    )
+    return {
+        "intent": "suggest_3d_prompt",
+        "mode": mode,
+        "message": message,
+        "reply": (
+            "Here is a docking-ready prompt template you can paste into a 3D visualization or docking workflow.\n\n"
+            f"{prompt_template}"
+        ),
+        "summary": prompt_template,
+        "source": "chat_intent_router",
+        "generated_candidates": [],
+        "molecules": [],
+        "metadata": {
+            "target": target_context["target"],
+            "target_label": target_label,
+            "reference_drug": reference_drug,
+            "prompt_template": prompt_template,
+        },
+        "limitations": [
+            "This prepares a docking prompt only; it does not run docking or validate binding.",
+            "Use experimental structures and wet-lab assays before making biological claims.",
+        ],
+        "next_steps": [
+            "Paste a generated SMILES into the ligand field.",
+            "Run docking with an experimentally supported protein structure.",
+            "Compare against the reference ligand before prioritizing a molecule.",
+        ],
+        "conversation_state": _build_conversation_state(
+            intent="suggest_3d_prompt",
+            mode=mode,
+            target_label=target_label,
+            candidate_smiles=None,
+        ),
+    }
+
+
+def _build_general_chat_response(message: str, mode: str) -> dict[str, Any]:
+    """Return a safe general answer for prompts that do not request a tool."""
+    return {
+        "intent": "general",
+        "mode": mode,
+        "message": message,
+        "reply": (
+            "I can help with GenorovaAI molecular discovery workflows. Ask me to generate candidate molecules, "
+            "score a SMILES string for QED/Lipinski/ADMET-style properties, explain a result, or prepare a 3D docking prompt."
+        ),
+        "summary": (
+            "Try: 'generate 5 DPP-4 inhibitors', 'score CCO for Lipinski and QED', "
+            "or 'suggest 3D prompt for DPP4 docking'."
+        ),
+        "source": "chat_intent_router",
+        "generated_candidates": [],
+        "molecules": [],
+        "metadata": {"supported_intents": ["generate", "score", "explain", "suggest_3d_prompt", "general"]},
+        "limitations": ["GenorovaAI outputs are computational research support, not clinical or medical advice."],
+        "next_steps": [
+            "Generate candidates for a supported target.",
+            "Paste a SMILES string to score it.",
+            "Ask for a 3D/docking prompt template.",
+        ],
+        "conversation_state": _build_conversation_state(
+            intent="general",
+            mode=mode,
+            target_label="GenorovaAI workspace",
+            candidate_smiles=None,
+        ),
+    }
+
+
+def _chat_response_molecules(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize generated, scored, or compared molecules for the frontend card contract."""
+    generated = response.get("generated_candidates")
+    if isinstance(generated, list) and generated:
+        return generated
+
+    comparison = response.get("comparison")
+    comparison_molecules = comparison.get("molecules") if isinstance(comparison, dict) else None
+    if isinstance(comparison_molecules, list) and comparison_molecules:
+        return comparison_molecules
+
+    candidate = response.get("candidate")
+    if isinstance(candidate, dict) and candidate.get("smiles"):
+        return [candidate]
+
+    molecules = response.get("molecules")
+    if isinstance(molecules, list):
+        return molecules
+
+    return []
+
+
+def _chat_reply_text(response: dict[str, Any]) -> str:
+    """Extract the plain-English reply field promised by the stable chat endpoint."""
+    for key in ("reply", "summary", "message", "why"):
+        value = response.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "GenorovaAI processed the request, but no text response was produced."
+
+
 def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, Any]) -> dict:
     """Route a natural-language chat request to existing Genorova logic."""
     target_context = _infer_target_context(message)
@@ -3516,6 +3730,12 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         default_count = int(state.get("requested_count") or 5)
     except (TypeError, ValueError):
         default_count = 5
+
+    if intent == "suggest_3d_prompt":
+        return _build_3d_prompt_response(message, mode, target_context)
+
+    if intent == "general":
+        return _build_general_chat_response(message, mode)
 
     if intent == "score":
         if not resolved_smiles:

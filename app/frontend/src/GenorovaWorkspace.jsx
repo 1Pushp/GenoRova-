@@ -19,12 +19,14 @@ const C = {
 /* -- Demo prompts -- */
 const DEMOS = [
   'Generate 10 DPP-4 inhibitors under 450 daltons',
+  'Suggest 3D prompt for DPP4 docking',
   'Show me antibacterial candidates with high QED score',
   'Find drug-like molecules similar to Sitagliptin',
   'Generate 5 molecules for diabetes research',
   'What is the ADMET profile of aspirin?',
-  'Show antifungal candidates under 500 daltons',
 ]
+
+const CHAT_ENDPOINT = '/api/chat'
 
 /* -- API helpers -- */
 async function getUser() {
@@ -44,7 +46,10 @@ async function logout() {
 }
 
 async function sendMessage(message, sessionId) {
-  const r = await fetch('/api/chat', {
+  console.log('[Chat] message submitted', { message, sessionId })
+  console.log('[Chat] endpoint called', { endpoint: CHAT_ENDPOINT, method: 'POST' })
+
+  const r = await fetch(CHAT_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -54,14 +59,22 @@ async function sendMessage(message, sessionId) {
       mode: 'scientific',
     }),
   })
+
+  console.log('[Chat] status code', r.status)
+  const payload = await r.json().catch((error) => {
+    console.error('[Chat] response JSON parse error', error)
+    return { detail: `HTTP ${r.status}` }
+  })
+  console.log('[Chat] response JSON', payload)
+
   if (!r.ok) {
-    const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }))
-    throw Object.assign(new Error(err.detail || 'Request failed'), {
+    console.error('[Chat] error details', { status: r.status, payload })
+    throw Object.assign(new Error(errorText(payload.detail || payload.message, 'Request failed')), {
       response: r,
-      data: err,
+      data: payload,
     })
   }
-  return await r.json()
+  return payload
 }
 
 async function getSessions() {
@@ -83,13 +96,41 @@ function valueFrom(obj, keys, fallback = '') {
   return fallback
 }
 
+function extractMolecules(data) {
+  if (!data || typeof data !== 'object') return []
+  if (Array.isArray(data.molecules) && data.molecules.length > 0) {
+    return data.molecules
+  }
+  if (Array.isArray(data.generated_candidates) && data.generated_candidates.length > 0) {
+    return data.generated_candidates
+  }
+  if (Array.isArray(data.comparison?.molecules) && data.comparison.molecules.length > 0) {
+    return data.comparison.molecules
+  }
+  if (data.candidate?.smiles) {
+    return [data.candidate]
+  }
+  return []
+}
+
+function errorText(value, fallback = 'Request failed') {
+  if (!value) return fallback
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map((item) => errorText(item, '')).filter(Boolean).join('; ') || fallback
+  if (typeof value === 'object') {
+    return value.message || value.detail || value.error || JSON.stringify(value)
+  }
+  return String(value)
+}
+
 /* -- Format AI response into readable text -- */
 function formatResponse(data) {
   if (typeof data === 'string') return data
 
   const parts = []
 
-  if (data.summary) parts.push(data.summary)
+  const primaryReply = data.reply || data.summary || data.message
+  if (primaryReply) parts.push(primaryReply)
 
   if (data.generated_candidates?.length > 0) {
     parts.push(`\n**Generated ${data.generated_candidates.length} candidates:**`)
@@ -151,6 +192,107 @@ function contentFromStoredMessage(message) {
   if (message.payload) return formatResponse(message.payload)
   if (message.content) return formatResponse(message.content)
   return ''
+}
+
+function MoleculeCards({ molecules }) {
+  if (!molecules?.length) return null
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        display: 'grid',
+        gap: 10,
+      }}
+    >
+      {molecules.slice(0, 5).map((molecule, index) => {
+        const smiles = valueFrom(molecule, ['smiles', 'SMILES'], 'Unknown SMILES')
+        const score = valueFrom(molecule, ['score', 'clinical_score', 'composite_score', 'rank_score'], 'n/a')
+        const qed = valueFrom(molecule, ['qed_score', 'QED', 'qed'], 'n/a')
+        const mw = valueFrom(molecule, ['molecular_weight', 'mol_weight', 'MW', 'mw'], 'n/a')
+        const grade = valueFrom(molecule, ['grade', 'recommendation', 'rank_label'], '')
+
+        return (
+          <div
+            key={`${smiles}-${index}`}
+            style={{
+              border: `1px solid ${C.border}`,
+              borderRadius: 12,
+              background: C.lgrey,
+              padding: 12,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 10,
+                alignItems: 'center',
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.blue2 }}>
+                Molecule {index + 1}
+              </div>
+              {grade && (
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: C.blue,
+                    background: C.white,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 999,
+                    padding: '2px 8px',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {grade}
+                </div>
+              )}
+            </div>
+            {molecule.molecule_svg ? (
+              <div
+                style={{
+                  background: C.white,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 10,
+                  marginBottom: 8,
+                  overflow: 'hidden',
+                  maxHeight: 180,
+                }}
+                dangerouslySetInnerHTML={{ __html: molecule.molecule_svg }}
+              />
+            ) : null}
+            <div
+              style={{
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                fontSize: 12,
+                color: C.blue,
+                wordBreak: 'break-all',
+                lineHeight: 1.5,
+              }}
+            >
+              {smiles}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 6,
+                marginTop: 8,
+                color: C.grey,
+                fontSize: 11,
+              }}
+            >
+              <span>Score: {score}</span>
+              <span>QED: {qed}</span>
+              <span>MW: {mw}</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 /* -- Message bubble -- */
@@ -220,7 +362,7 @@ function Message({ msg }) {
         ) : (
           <div
             style={{
-              color: C.blue,
+              color: msg.error ? '#991B1B' : C.blue,
               fontSize: 14,
               lineHeight: 1.7,
               whiteSpace: 'pre-wrap',
@@ -232,6 +374,24 @@ function Message({ msg }) {
             )}
           </div>
         )}
+        {!msg.loading && msg.error && (
+          <div
+            style={{
+              marginTop: 10,
+              border: '1px solid #FCA5A5',
+              background: '#FEF2F2',
+              color: '#991B1B',
+              borderRadius: 10,
+              padding: '8px 10px',
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            Backend request failed. Check the browser console for endpoint, status code,
+            response JSON, and error details.
+          </div>
+        )}
+        {!msg.loading && !isUser && <MoleculeCards molecules={msg.molecules} />}
         {!msg.loading && msg.source && (
           <div
             style={{
@@ -291,6 +451,7 @@ export default function GenorovaWorkspace() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [lastError, setLastError] = useState(null)
   const [sidebarOpen, setSidebar] = useState(true)
   const bottomRef = useRef(null)
 
@@ -313,6 +474,7 @@ export default function GenorovaWorkspace() {
     setSessionId(null)
     setMessages([])
     setInput('')
+    setLastError(null)
   }
 
   /* Load existing session */
@@ -331,6 +493,8 @@ export default function GenorovaWorkspace() {
           history.map((m) => ({
             role: m.role,
             content: contentFromStoredMessage(m),
+            payload: m.payload || null,
+            molecules: extractMolecules(m.payload || m.content),
             source: m.payload?.source || m.payload?.program_context?.model || null,
             userName: user?.name || user?.email,
           })),
@@ -347,6 +511,7 @@ export default function GenorovaWorkspace() {
     if (!msg || loading) return
     setInput('')
     setLoading(true)
+    setLastError(null)
 
     const userName = user?.name || user?.email || 'You'
 
@@ -368,21 +533,22 @@ export default function GenorovaWorkspace() {
       }
 
       const response = formatResponse(data)
+      const molecules = extractMolecules(data)
       const source = data.source || data.program_context?.model || null
 
       setMessages((prev) => [
         ...prev.slice(0, -1),
-        { role: 'assistant', content: response, source },
+        { role: 'assistant', content: response, source, payload: data, molecules },
       ])
     } catch (e) {
       console.error('[Chat] Error:', e.message, e.data)
       let errorMsg = 'Connection error. '
       try {
         if (e.data) {
-          errorMsg = e.data.detail || e.data.message || errorMsg
+          errorMsg = errorText(e.data.detail || e.data.message, errorMsg)
         } else if (e.response) {
           const errData = await e.response.clone().json()
-          errorMsg = errData.detail || errData.message || errorMsg
+          errorMsg = errorText(errData.detail || errData.message, errorMsg)
         } else {
           errorMsg = e.message || errorMsg
         }
@@ -390,11 +556,13 @@ export default function GenorovaWorkspace() {
         errorMsg = e.message || errorMsg
       }
 
+      setLastError(errorMsg)
       setMessages((prev) => [
         ...prev.slice(0, -1),
         {
           role: 'assistant',
           content: `Error: ${errorMsg}\n\nIf this persists, try starting a New Chat.`,
+          error: true,
         },
       ])
     }
@@ -806,6 +974,23 @@ export default function GenorovaWorkspace() {
               borderTop: `1px solid ${C.border}`,
             }}
           >
+            {lastError && (
+              <div
+                style={{
+                  maxWidth: 760,
+                  margin: '0 auto 10px',
+                  border: '1px solid #FCA5A5',
+                  background: '#FEF2F2',
+                  color: '#991B1B',
+                  borderRadius: 12,
+                  padding: '10px 12px',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}
+              >
+                Chat request failed: {lastError}
+              </div>
+            )}
             <div
               style={{
                 maxWidth: 760,
