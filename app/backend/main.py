@@ -186,3 +186,58 @@ _register_route(
     get_conversation,
     summary="Load a stored conversation with messages",
 )
+
+
+@app.on_event("startup")
+async def _eager_model_load():
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        print("[STARTUP] Pre-loading CVAE model...")
+        from genorova.api.main import _get_model
+        await loop.run_in_executor(None, _get_model)
+        print("[STARTUP] CVAE model ready")
+    except Exception as e:
+        print(f"[STARTUP] Model pre-load warning: {e}")
+
+
+@app.get("/ready")
+def ready():
+    try:
+        from genorova.api.main import _model
+        return {
+            "ready": _model is not None,
+            "status": "model loaded" if _model is not None else "model not yet loaded",
+        }
+    except Exception as e:
+        return {"ready": False, "error": str(e)}
+
+
+def _prefer_backend_ready_route() -> None:
+    backend_ready_index = next(
+        (
+            index
+            for index, route in enumerate(app.router.routes)
+            if getattr(route, "path", None) == "/ready"
+            and getattr(getattr(route, "endpoint", None), "__module__", "") == __name__
+        ),
+        None,
+    )
+    first_ready_index = next(
+        (
+            index
+            for index, route in enumerate(app.router.routes)
+            if getattr(route, "path", None) == "/ready"
+        ),
+        None,
+    )
+    if (
+        backend_ready_index is not None
+        and first_ready_index is not None
+        and backend_ready_index > first_ready_index
+    ):
+        route = app.router.routes.pop(backend_ready_index)
+        app.router.routes.insert(first_ready_index, route)
+
+
+_prefer_backend_ready_route()

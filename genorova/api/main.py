@@ -63,6 +63,7 @@ def _get_model():
         )
 
     ckpt = torch.load(str(CKPT_PATH), weights_only=False, map_location='cpu')
+    print(f"[MODEL] Loaded epoch={ckpt.get('epoch')} val_loss={ckpt.get('val_loss'):.4f}")
     _cfg = ckpt['config']
 
     checkpoint_meta = _read_checkpoint_meta(str(CKPT_PATH))
