@@ -29,6 +29,9 @@ const DEMOS = [
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL || window.location.origin
 const API_BASE = RAW_API_BASE.replace(/\/$/, '')
 const CHAT_ENDPOINT = `${API_BASE}/api/chat`
+const CHAT_TIMEOUT_MS = 120000
+const CHAT_TIMEOUT_MESSAGE =
+  'Request took too long. Render free instance/model may still be warming up. Please retry.'
 
 /* -- API helpers -- */
 async function getUser() {
@@ -49,7 +52,13 @@ async function logout() {
 
 async function sendMessage(message, sessionId) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 60000)
+  const timeout = setTimeout(() => {
+    console.warn('[Chat] aborting request after timeout', {
+      endpoint: CHAT_ENDPOINT,
+      timeoutMs: CHAT_TIMEOUT_MS,
+    })
+    controller.abort(CHAT_TIMEOUT_MESSAGE)
+  }, CHAT_TIMEOUT_MS)
 
   const body = {
     message,
@@ -62,6 +71,7 @@ async function sendMessage(message, sessionId) {
   sendMessage.lastError = null
 
   try {
+    console.log('[Chat] CHAT_ENDPOINT', CHAT_ENDPOINT)
     console.log('[Chat] endpoint called', CHAT_ENDPOINT)
     console.log('[Chat] sending body', body)
 
@@ -77,6 +87,7 @@ async function sendMessage(message, sessionId) {
     console.log('[Chat] status code', r.status)
 
     const text = await r.text()
+    console.log('[Chat] raw response text', text)
     let payload = {}
 
     try {
@@ -101,8 +112,22 @@ async function sendMessage(message, sessionId) {
 
     return payload
   } catch (err) {
-    sendMessage.lastError = String(err?.message || err)
+    const abortReason = controller.signal.reason || err?.message || 'No abort reason provided'
+    const isAbort = err?.name === 'AbortError' || controller.signal.aborted
+    if (isAbort) {
+      console.warn('[Chat] abort reason', abortReason)
+    }
+    const friendlyError = isAbort ? CHAT_TIMEOUT_MESSAGE : String(err?.message || err)
+    sendMessage.lastError = friendlyError
     console.error('[Chat] fetch failed', err)
+    if (isAbort) {
+      throw Object.assign(new Error(CHAT_TIMEOUT_MESSAGE), {
+        name: 'AbortError',
+        endpoint: CHAT_ENDPOINT,
+        abortReason,
+        isAbort: true,
+      })
+    }
     throw err
   } finally {
     clearTimeout(timeout)
@@ -634,7 +659,9 @@ export default function GenorovaWorkspace() {
     } catch (e) {
       console.error('[Chat] error', e)
       const errorMsg =
-        'Backend request failed. Please check login/session, API endpoint, or Render deployment logs.'
+        e?.isAbort || e?.name === 'AbortError'
+          ? CHAT_TIMEOUT_MESSAGE
+          : 'Backend request failed. Please check login/session, API endpoint, or Render deployment logs.'
 
       setLastError(errorMsg)
       setChatDebug({
