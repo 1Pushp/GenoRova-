@@ -3,11 +3,11 @@ services:
     name: genorova-ai
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: >
-      uvicorn main:app
-      --host 0.0.0.0
-      --port $PORT
-      --app-dir /opt/render/project/src
+    startCommand: uvicorn app.backend.main:app --host 0.0.0.0 --port $PORT --app-dir /opt/render/project/src
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: GENOROVA_CHAT_ENABLE_CVAE
+        value: "1"
+      - key: HF_TOKEN
+        sync: false

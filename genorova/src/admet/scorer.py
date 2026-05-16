@@ -344,3 +344,8 @@ if __name__ == "__main__":
             ["smiles", "composite_score", "grade", "QED", "SA_Score", "pains_flag"]
         ]
         print(top.to_string(index=False))
+
+
+def score_molecules(smiles_list):
+    """Alias for score_batch. Accepts a list of SMILES strings."""
+    return score_batch(smiles_list)

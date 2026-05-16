@@ -19,6 +19,7 @@ except ImportError:
 
 from genorova.src import api as core_api
 from genorova.src import auth_store
+from genorova.api.main import metrics as cvae_metrics
 
 
 LOGGER = logging.getLogger("genorova.backend")
@@ -174,6 +175,7 @@ def get_conversation(conversation_id: str) -> dict[str, Any]:
 _wrap_core_lifespan()
 _register_frontend_serving()
 _register_route("/docs", "GET", docs_redirect, include_in_schema=False)
+_register_route("/metrics", "GET", cvae_metrics, tags=["System"], summary="Benchmark results and novelty stats")
 _register_route("/chat/storage", "GET", chat_storage, summary="Inspect chat storage mode")
 _register_route("/chat", "POST", chat, summary="Chat with Genorova")
 _register_route("/conversations", "GET", list_conversations, summary="List stored conversations")

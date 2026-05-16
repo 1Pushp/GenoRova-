@@ -18,13 +18,13 @@ try:
 except Exception as e:
     print(f"[STARTUP] Warning: {e}")
 
-# Import and expose app
-from genorova.api import main as api_main  # noqa: E402
+# Import and expose the full backend app used by Render.
+from app.backend import main as backend_main  # noqa: E402
 
-app = api_main.app
+app = backend_main.app
 
 
 def __getattr__(name):
-    return getattr(api_main, name)
+    return getattr(backend_main, name)
 
 __all__ = ["app"]

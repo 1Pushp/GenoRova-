@@ -90,7 +90,7 @@ GENERATION_SAMPLE_FLOOR = 40
 GENERATION_SAMPLE_CAP = 120
 GENERATION_PROBE_FLOOR = 20
 GENERATION_PROBE_CAP = 24
-CHAT_ENABLE_DIRECT_CVAE = os.getenv("GENOROVA_CHAT_ENABLE_CVAE", "").strip().lower() in {
+CHAT_ENABLE_DIRECT_CVAE = os.environ.get("GENOROVA_CHAT_ENABLE_CVAE", '1').strip().lower() in {
     "1",
     "true",
     "yes",
@@ -3952,7 +3952,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         base_smiles = resolved_smiles[0] if resolved_smiles else latest_candidate_smiles
         if not base_smiles:
             try:
-                generated = _generate_candidates_for_disease(target_bucket, 1, allow_runtime=False)
+                generated = _generate_candidates_for_disease(target_bucket, 1, allow_runtime=True)
             except Exception as exc:
                 print(f"[CHAT] Optimize fallback failed: {exc}")
                 generated = {"molecules": []}
@@ -4106,7 +4106,7 @@ def _build_chat_response(intent: str, mode: str, message: str, state: dict[str, 
         )
 
     try:
-        generated = _generate_candidates_for_disease(target_bucket, requested_count, allow_runtime=False)
+        generated = _generate_candidates_for_disease(target_bucket, requested_count, allow_runtime=True)
     except Exception as exc:
         print(f"[CHAT] Active generation fallback failed: {exc}")
         return _build_chat_initializing_response(

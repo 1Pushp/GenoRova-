@@ -6,9 +6,9 @@ Production training loop for the Genorova Conditional VAE.
 Features
 --------
   - MoleculeDataset  : BPE tokenisation + QED/LogP/MW/SA property labels
-  - AdamW + LambdaLR warmup/cosine decay schedule
+  - AdamW + LambdaLR warmup/flat schedule
   - Automatic Mixed Precision (enabled automatically when CUDA is present)
-  - Gradient clipping, cyclic KL annealing with linear warmup
+  - Gradient clipping, slow KL beta warmup
   - Step logging (every 100 steps): loss components, perplexity, validity %
   - Epoch validation: validity %, uniqueness %, novelty %
   - Checkpoints: best-by-val-loss + every-N-epoch snapshots + resume
@@ -58,7 +58,7 @@ _ROOT  = _SRC.parent                              # genorova/
 sys.path.insert(0, str(_ROOT))                    # allow: from models.cvae import ...
 
 from models.cvae import (                         # noqa: E402
-    CVAE, cyclic_beta, print_model_summary,
+    CVAE, print_model_summary,
     PAD_ID, BOS_ID, EOS_ID, MAX_SEQ_LEN, NUM_PROPS,
 )
 
@@ -80,7 +80,8 @@ except Exception:
 
 try:
     from rdkit import Chem, RDLogger
-    from rdkit.Chem import Descriptors, QED
+    from rdkit.Chem import Descriptors, QED as QEDCalc
+    from rdkit.Chem.rdMolDescriptors import CalcTPSA
     RDLogger.DisableLog("rdApp.*")   # silence SMILES parse noise in logs
     _RDKIT_OK = True
 except ImportError:
@@ -109,6 +110,7 @@ class TrainConfig:
     val_fraction:   float = 0.10
     max_moses_rows: int   = 50_000
     max_rows:       int   = 0       # 0 = use all rows; >0 caps dataset for smoke tests
+    data_path: Optional[str] = None
 
     # Model
     vocab_size:  int   = 1000
@@ -126,7 +128,7 @@ class TrainConfig:
     weight_decay:   float = 1e-4
     label_smoothing: float = 0.1
     grad_clip:      float = 1.0
-    warmup_epochs:  int   = 5     # LR warmup and linear KL warmup before cyclic schedule
+    warmup_epochs:  int   = 5     # LR warmup; beta uses step-based slow warmup
     kl_free_bits:   float = 0.5
     kl_cycle_len:   int   = 10
     lambda_prop:    float = 0.5
@@ -134,6 +136,8 @@ class TrainConfig:
     # Checkpointing
     save_every: int  = 5
     resume:       bool = False
+    resume_from: Optional[str] = None
+    checkpoint_dir: Optional[str] = None
 
     # Logging
     log_every_n_steps: int  = 100
@@ -203,11 +207,28 @@ def _mol_props(smi: str) -> Optional[tuple[float, float, float, float]]:
     if mol is None:
         return None
     try:
-        qed  = QED.qed(mol)
+        qed  = QEDCalc.qed(mol)
         logp = Descriptors.MolLogP(mol)
         mw   = Descriptors.ExactMolWt(mol)
         sa   = _calc_sa(mol) if _SA_AVAILABLE else 4.0
         return qed, logp, mw, sa
+    except Exception:
+        return None
+
+
+def _compute_props(smi: str) -> Optional[dict[str, float]]:
+    """Compute training properties for a SMILES string when CSV columns are absent."""
+    try:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            return None
+        CalcTPSA(mol)
+        return {
+            "qed":        round(QEDCalc.qed(mol), 4),
+            "logp":       round(Descriptors.MolLogP(mol), 4),
+            "mol_weight": round(Descriptors.MolWt(mol), 4),
+            "sa_score":   2.0,
+        }
     except Exception:
         return None
 
@@ -285,15 +306,34 @@ def _load_v2_csv(path: Path) -> tuple[list[str], np.ndarray]:
     Skips slow on-the-fly property computation since v2 stores them already.
     """
     df = pd.read_csv(path)
-    df = df.dropna(subset=["smiles"])
-    smiles = df["smiles"].str.strip().tolist()
+    df = df.dropna(subset=["smiles"]).copy()
+    df["smiles"] = df["smiles"].str.strip()
+    smiles = df["smiles"].tolist()
 
-    # Fill any missing sa_score with mean value
-    for col in ("qed", "logp", "mol_weight", "sa_score"):
-        if col not in df.columns:
-            df[col] = 4.0 if col == "sa_score" else 0.0
+    required_props = ("qed", "logp", "mol_weight")
+    if any(col not in df.columns for col in required_props):
+        print(f"[DATA] Computing properties for {len(smiles)} molecules — this takes ~2 min")
+        valid_smiles: list[str] = []
+        computed_props: list[dict[str, float]] = []
+        for smi in tqdm(smiles, desc="  Computing CSV properties", unit="mol", leave=False):
+            props = _compute_props(smi)
+            if props is None:
+                continue
+            valid_smiles.append(smi)
+            computed_props.append(props)
+        if not computed_props:
+            sys.exit(f"[ERROR] No valid molecules found while computing properties for {path}")
+        props = pd.DataFrame(computed_props)[["qed", "logp", "mol_weight", "sa_score"]]
+        return valid_smiles, props.values.astype(np.float32)
 
-    props = df[["qed", "logp", "mol_weight", "sa_score"]].fillna(4.0).values.astype(np.float32)
+    if "sa_score" not in df.columns:
+        df["sa_score"] = 2.0
+
+    props = df[["qed", "logp", "mol_weight", "sa_score"]].copy()
+    props["sa_score"] = props["sa_score"].fillna(2.0)
+    props = props.dropna(subset=list(required_props))
+    smiles = df.loc[props.index, "smiles"].tolist()
+    props = props.values.astype(np.float32)
     return smiles, props
 
 
@@ -342,7 +382,17 @@ def build_dataloaders(cfg: TrainConfig,
     cleaned_v2 = DATA_DIR / "cleaned_molecules_v2.csv"
     cleaned_v1 = DATA_DIR / "cleaned_molecules.csv"
 
-    if cleaned_v3.exists():
+    override_data_path = Path(cfg.data_path).resolve() if cfg.data_path else None
+
+    if override_data_path is not None:
+        if not override_data_path.exists():
+            sys.exit(f"[ERROR] Data path not found: {override_data_path}")
+        smi, props = _load_v2_csv(override_data_path)
+        all_smi.extend(smi); all_props.append(props)
+        dataset_name = override_data_path.name
+        dataset_rows = len(smi)
+        print(f"  data_path override: {len(smi):,} from {override_data_path}")
+    elif cleaned_v3.exists():
         smi, props = _load_v2_csv(cleaned_v3)   # v3 has same columns as v2
         all_smi.extend(smi); all_props.append(props)
         dataset_name = cleaned_v3.name
@@ -474,7 +524,8 @@ def save_checkpoint(path: Path, model: CVAE, optimizer, scheduler,
                     prop_mean: np.ndarray, prop_std: np.ndarray,
                     cfg: TrainConfig, global_step: int = 0) -> None:
     """Save full training state to disk."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    save_path = str(Path(path).resolve())
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save({
         "epoch":           epoch,
         "global_step":     global_step,
@@ -486,7 +537,7 @@ def save_checkpoint(path: Path, model: CVAE, optimizer, scheduler,
         "prop_mean":       prop_mean,
         "prop_std":        prop_std,
         "config":          asdict(cfg),
-    }, path)
+    }, save_path)
 
 
 def load_checkpoint(path: Path, model: CVAE, optimizer,
@@ -554,11 +605,13 @@ class StepLogger:
 # KL annealing
 # ===========================================================================
 
-def get_beta(epoch: int, cfg: TrainConfig) -> float:
-    """Linear warmup for first warmup_epochs, then cyclic annealing."""
-    if epoch < cfg.warmup_epochs:
-        return epoch / max(cfg.warmup_epochs, 1)
-    return cyclic_beta(epoch - cfg.warmup_epochs, cfg.kl_cycle_len)
+def get_beta(global_step: int, cfg: TrainConfig, steps_per_epoch: int) -> float:
+    """Slow step-based KL beta warmup capped at 0.05."""
+    # Slow linear beta warmup over first 50% of training steps
+    total_steps = cfg.epochs * steps_per_epoch
+    warmup_steps = total_steps * 0.5
+    beta = min(0.05, (global_step / max(warmup_steps, 1)) * 0.05)
+    return beta
 
 
 # ===========================================================================
@@ -598,18 +651,16 @@ def compute_cvae_loss(
     }
 
 
-def build_warmup_cosine_scheduler(optimizer, cfg: TrainConfig):
-    """Epoch-level LambdaLR: linear warmup, then cosine decay to 1e-5."""
-    min_factor = 1e-5 / max(cfg.lr, 1e-12)
+def build_warmup_flat_scheduler(optimizer, cfg: TrainConfig,
+                                steps_per_epoch: int):
+    """Step-level LambdaLR: linear warmup, then flat LR."""
+    warmup_epochs = cfg.warmup_epochs
 
-    def lr_lambda(epoch: int) -> float:
-        if cfg.warmup_epochs > 0 and epoch < cfg.warmup_epochs:
-            return max((epoch + 1) / cfg.warmup_epochs, min_factor)
-
-        decay_epochs = max(cfg.epochs - cfg.warmup_epochs, 1)
-        progress = min(max((epoch - cfg.warmup_epochs) / decay_epochs, 0.0), 1.0)
-        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
-        return min_factor + (1.0 - min_factor) * cosine
+    def lr_lambda(current_step: int) -> float:
+        warmup_steps = warmup_epochs * steps_per_epoch
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        return 1.0
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
@@ -634,7 +685,8 @@ def train_one_epoch(model: CVAE, loader: DataLoader,
                     device: torch.device,
                     training_set: set[str],
                     global_step: int,
-                    use_amp: bool) -> tuple[float, int]:
+                    use_amp: bool,
+                    steps_per_epoch: int) -> tuple[float, int]:
     """
     One full training epoch.
 
@@ -642,12 +694,13 @@ def train_one_epoch(model: CVAE, loader: DataLoader,
     Logs every cfg.log_every_n_steps steps.
     """
     model.train()
-    beta     = get_beta(epoch, cfg)
     total_loss_sum = 0.0
     n_batches      = 0
+    consecutive_nan = 0
 
     pbar = tqdm(loader, desc=f"Epoch {epoch:03d} train", unit="batch", leave=False)
     for batch in pbar:
+        beta = get_beta(global_step, cfg, steps_per_epoch)
         tokens = batch["tokens"].to(device)   # [B, L]
         props  = batch["props"].to(device)    # [B, 4]
         full_batch = tokens.size(0)
@@ -656,6 +709,8 @@ def train_one_epoch(model: CVAE, loader: DataLoader,
         optimizer.zero_grad(set_to_none=True)
 
         metric_sums = {"loss": 0.0, "recon_loss": 0.0, "kl_loss": 0.0, "prop_loss": 0.0}
+        skip_batch = False
+        stop_epoch_early = False
         for start in range(0, full_batch, micro_batch):
             end = min(start + micro_batch, full_batch)
             weight = (end - start) / full_batch
@@ -671,16 +726,36 @@ def train_one_epoch(model: CVAE, loader: DataLoader,
                     beta=beta, lambda_prop=cfg.lambda_prop,
                     criterion=criterion, kl_free_bits=cfg.kl_free_bits,
                 )
-                scaled_loss = loss_dict["loss"] * weight
+                loss = loss_dict["loss"]
+                scaled_loss = loss * weight
 
+            if torch.isnan(loss) or torch.isinf(loss):
+                consecutive_nan += 1
+                print(f"[NaN GUARD] Skipping batch at step {global_step} "
+                      f"({consecutive_nan} consecutive)")
+                optimizer.zero_grad()
+                if consecutive_nan >= 10:
+                    print("[NaN GUARD] 10 consecutive NaN batches — stopping epoch early")
+                    stop_epoch_early = True
+                    break
+                skip_batch = True
+                break
             scaler.scale(scaled_loss).backward()
             for key in metric_sums:
                 metric_sums[key] += float(loss_dict[key].detach()) * weight
 
+        if stop_epoch_early:
+            break
+
+        if skip_batch:
+            continue
+
+        consecutive_nan = 0  # reset on healthy batch
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
+        scheduler.step()
 
         loss_dict = {
             key: torch.tensor(value, device=device)
@@ -702,7 +777,6 @@ def train_one_epoch(model: CVAE, loader: DataLoader,
             _log_step(model, loss_dict, beta, optimizer, tokenizer,
                       device, cfg, epoch, global_step, training_set, logger)
 
-    scheduler.step()
     return total_loss_sum / max(n_batches, 1), global_step
 
 
@@ -754,14 +828,16 @@ def validate_epoch(model: CVAE, val_loader: DataLoader,
                    device: torch.device,
                    training_set: set[str],
                    prop_mean: np.ndarray,
-                   prop_std: np.ndarray) -> dict[str, float]:
+                   prop_std: np.ndarray,
+                   global_step: int,
+                   steps_per_epoch: int) -> dict[str, float]:
     """
     Compute validation reconstruction loss, then generate cfg.val_gen_n
     molecules and report validity / uniqueness / novelty.
     Returns a metrics dict.
     """
     model.eval()
-    beta     = get_beta(epoch, cfg)
+    beta     = get_beta(global_step, cfg, steps_per_epoch)
     val_loss = 0.0
     n_batches = 0
 
@@ -808,9 +884,9 @@ def validate_epoch(model: CVAE, val_loader: DataLoader,
 
 def train(cfg: TrainConfig) -> None:
     """Full training run: setup -> loop -> checkpoint -> log."""
-    CKPT_DIR = Path(os.environ.get('GENOROVA_CKPT_DIR', 'outputs/checkpoints'))
+    CKPT_DIR = Path(cfg.checkpoint_dir).resolve() if cfg.checkpoint_dir else (_ROOT / "outputs" / "checkpoints").resolve()
     LOG_DIR  = Path(os.environ.get('GENOROVA_LOG_DIR',  'outputs/logs'))
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
+    os.makedirs(CKPT_DIR, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -839,6 +915,7 @@ def train(cfg: TrainConfig) -> None:
 
     # Data
     tr_loader, val_loader, training_set = build_dataloaders(cfg, tokenizer)
+    steps_per_epoch = len(tr_loader)
     train_ds = tr_loader.dataset
     prop_mean: np.ndarray = train_ds.prop_mean   # type: ignore[union-attr]
     prop_std:  np.ndarray = train_ds.prop_std    # type: ignore[union-attr]
@@ -848,14 +925,21 @@ def train(cfg: TrainConfig) -> None:
                  latent_dim=cfg.latent_dim, num_heads=cfg.num_heads,
                  num_layers=cfg.num_layers, dropout=cfg.dropout,
                  max_len=cfg.max_seq_len).to(device)
+    if cfg.resume_from and os.path.exists(cfg.resume_from):
+        ckpt = torch.load(cfg.resume_from,
+                          weights_only=False, map_location='cpu')
+        model.load_state_dict(ckpt['model_state'])
+        print(f"[RESUME] Loaded weights from {cfg.resume_from}")
+        print(f"[RESUME] Previous epoch={ckpt.get('epoch')} "
+              f"val_loss={ckpt.get('val_loss'):.4f}")
     print(f"[MODEL] dropout={cfg.dropout}")
     print_model_summary(model)
 
     # Optimiser + scheduler
     optimizer = torch.optim.AdamW(model.parameters(),
                                   lr=cfg.lr, weight_decay=cfg.weight_decay)
-    scheduler = build_warmup_cosine_scheduler(optimizer, cfg)
-    print(f"[LR] LambdaLR warmup_epochs={cfg.warmup_epochs} cosine_min_lr=1e-5")
+    scheduler = build_warmup_flat_scheduler(optimizer, cfg, steps_per_epoch)
+    print(f"[LR] LambdaLR warmup_epochs={cfg.warmup_epochs} flat_after_warmup=True")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)   # enabled=False is no-op on CPU
 
     # Resume
@@ -885,13 +969,13 @@ def train(cfg: TrainConfig) -> None:
         train_loss, global_step = train_one_epoch(
             model, tr_loader, optimizer, scheduler, scaler, criterion,
             cfg, epoch, tokenizer, logger, device,
-            training_set, global_step, use_amp,
+            training_set, global_step, use_amp, steps_per_epoch,
         )
 
         # ── Validation ────────────────────────────────────────────────────
         val_metrics = validate_epoch(
             model, val_loader, cfg, epoch, tokenizer, criterion, device,
-            training_set, prop_mean, prop_std,
+            training_set, prop_mean, prop_std, global_step, steps_per_epoch,
         )
         val_loss = val_metrics["val_loss"]
         elapsed  = time.time() - t0
@@ -950,8 +1034,30 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--warmup-epochs", type=int,   default=5)
     parser.add_argument("--log-every-n-steps", type=int, default=100,
                         dest="log_every_n_steps")
-    parser.add_argument("--include-moses", action="store_true",
-                        help="Add MOSES train data to the training set")
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default=None,
+        help="Path to training CSV file. If provided, overrides the default data location.",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=None,
+        help="Directory to save checkpoints. If provided, overrides the default checkpoint path.",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Path to checkpoint to resume weights from.",
+    )
+    parser.add_argument(
+        "--include-moses",
+        type=lambda x: x.lower() in ("1", "true", "yes"),
+        default=False,
+        help="Include MOSES dataset in training. Pass True or False.",
+    )
     parser.add_argument("--resume",        action="store_true",
                         help="Resume from checkpoints/best.pt")
     parser.add_argument("--wandb",         action="store_true",
@@ -960,6 +1066,12 @@ def parse_args() -> TrainConfig:
                         help="Cap dataset size (0=all); useful for quick smoke tests")
 
     a = parser.parse_args()
+    data_path = Path(a.data_path).resolve() if a.data_path is not None else None
+    if a.checkpoint_dir is not None:
+        ckpt_dir = Path(a.checkpoint_dir).resolve()
+        os.makedirs(ckpt_dir, exist_ok=True)
+    else:
+        ckpt_dir = None
 
     return TrainConfig(
         epochs=a.epochs,
@@ -975,10 +1087,13 @@ def parse_args() -> TrainConfig:
         save_every=a.save_every,
         val_gen_n=a.val_gen_n,
         max_moses_rows=a.max_moses,
+        data_path=str(data_path) if data_path is not None else None,
         warmup_epochs=a.warmup_epochs,
         log_every_n_steps=a.log_every_n_steps,
         include_moses=a.include_moses,
         resume=a.resume,
+        resume_from=a.resume_from,
+        checkpoint_dir=str(ckpt_dir) if ckpt_dir is not None else None,
         wandb_enabled=a.wandb,
         max_rows=a.max_rows,
     )

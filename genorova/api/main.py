@@ -10,13 +10,33 @@ from models.cvae import CVAE
 from admet.scorer import score_batch as _score_batch, score_smiles as _score_smiles
 
 GENOROVA_DIR = Path(__file__).resolve().parent.parent
+CKPT_PATH = GENOROVA_DIR / "outputs" / "checkpoints" / "best.pt"
+
+
+def _read_checkpoint_meta(path: str) -> dict:
+    import torch, os
+
+    if not os.path.exists(path):
+        return {"epoch": None, "val_loss": None, "loaded": False}
+    try:
+        ckpt = torch.load(path, weights_only=False, map_location="cpu")
+        return {
+            "epoch": ckpt.get("epoch"),
+            "val_loss": ckpt.get("val_loss"),
+            "loaded": True,
+        }
+    except Exception as e:
+        return {"epoch": None, "val_loss": None, "loaded": False, "error": str(e)}
+
+
+_CHECKPOINT_META = _read_checkpoint_meta(str(CKPT_PATH))
 
 # Model state (loaded on first use)
 _model = None
 _tok = None
 _cfg = None
-MODEL_EPOCH = 19
-MODEL_VAL_LOSS = 0.9786
+MODEL_EPOCH = _CHECKPOINT_META.get("epoch")
+MODEL_VAL_LOSS = _CHECKPOINT_META.get("val_loss")
 MAX_LEN = 128
 
 
@@ -25,7 +45,6 @@ def _get_model():
     if _model is not None:
         return _model, _tok
 
-    CKPT_PATH = GENOROVA_DIR / "outputs" / "checkpoints" / "best.pt"
     TOK_PATH = GENOROVA_DIR / "tokenizer" / "genorova_bpe.json"
 
     # Try downloading if missing
@@ -46,8 +65,9 @@ def _get_model():
     ckpt = torch.load(str(CKPT_PATH), weights_only=False, map_location='cpu')
     _cfg = ckpt['config']
 
-    MODEL_EPOCH = ckpt.get('epoch', 19)
-    MODEL_VAL_LOSS = ckpt.get('val_loss', 0.9786)
+    checkpoint_meta = _read_checkpoint_meta(str(CKPT_PATH))
+    MODEL_EPOCH = checkpoint_meta.get('epoch')
+    MODEL_VAL_LOSS = checkpoint_meta.get('val_loss')
     MAX_LEN = _cfg.get('max_seq_len', 128)
 
     _tok = CVAETokenizer(TOK_PATH, max_len=MAX_LEN)
@@ -61,7 +81,8 @@ def _get_model():
     )
     _model.load_state_dict(ckpt['model_state'])
     _model.eval()
-    print(f"[MODEL] Loaded epoch={MODEL_EPOCH} val_loss={MODEL_VAL_LOSS:.4f}")
+    val_loss_display = f"{MODEL_VAL_LOSS:.4f}" if MODEL_VAL_LOSS is not None else "unknown"
+    print(f"[MODEL] Loaded epoch={MODEL_EPOCH} val_loss={val_loss_display}")
     return _model, _tok
 
 # ── Logging ───────────────────────────────────────────────────
@@ -204,7 +225,7 @@ def health():
         "version": "1.0.0",
         "model": "Genorova CVAE",
         "model_epoch": MODEL_EPOCH,
-        "model_val_loss": round(MODEL_VAL_LOSS, 4),
+        "model_val_loss": round(MODEL_VAL_LOSS, 4) if MODEL_VAL_LOSS is not None else None,
         "model_params": "6,785,068",
         "checkpoint_loaded": _model is not None,
         "checkpoint_exists": ckpt_exists,
@@ -230,7 +251,7 @@ def metrics():
     out = {}
     for name, path in [
         ("novelty",  GENOROVA_DIR / "outputs" / "NOVELTY_PROOF_REPORT.json"),
-        ("moses",    GENOROVA_DIR / "benchmarks" / "moses_results.json"),
+        ("moses",    GENOROVA_DIR / "outputs" / "benchmarks" / "moses_results.json"),
     ]:
         if path.exists():
             out[name] = json.loads(path.read_text(encoding="utf-8"))
