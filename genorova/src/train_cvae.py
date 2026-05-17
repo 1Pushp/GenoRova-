@@ -606,11 +606,12 @@ class StepLogger:
 # ===========================================================================
 
 def get_beta(global_step: int, cfg: TrainConfig, steps_per_epoch: int) -> float:
-    """Slow step-based KL beta warmup capped at 0.05."""
-    # Slow linear beta warmup over first 50% of training steps
+    """Slow step-based KL beta warmup capped at 0.1."""
+    # Slow linear beta warmup from step 0 over first 50% of training steps.
+    beta_max = 0.1
     total_steps = cfg.epochs * steps_per_epoch
     warmup_steps = total_steps * 0.5
-    beta = min(0.05, (global_step / max(warmup_steps, 1)) * 0.05)
+    beta = min(beta_max, (global_step / max(warmup_steps, 1)) * beta_max)
     return beta
 
 
@@ -640,13 +641,16 @@ def compute_cvae_loss(
     )
 
     kl_loss = (-0.5 * (1.0 + log_var - mu.pow(2) - log_var.exp())).mean()
+    raw_kl_loss = kl_loss
     prop_loss = nn.functional.mse_loss(pred_props, true_props)
+    kl_loss = torch.clamp(kl_loss, max=50.0)
     total_loss = recon_loss + beta * kl_loss + lambda_prop * prop_loss
 
     return {
         "loss": total_loss,
         "recon_loss": recon_loss.detach(),
         "kl_loss": kl_loss.detach(),
+        "raw_kl_loss": raw_kl_loss.detach(),
         "prop_loss": prop_loss.detach(),
     }
 
@@ -708,7 +712,13 @@ def train_one_epoch(model: CVAE, loader: DataLoader,
 
         optimizer.zero_grad(set_to_none=True)
 
-        metric_sums = {"loss": 0.0, "recon_loss": 0.0, "kl_loss": 0.0, "prop_loss": 0.0}
+        metric_sums = {
+            "loss": 0.0,
+            "recon_loss": 0.0,
+            "kl_loss": 0.0,
+            "raw_kl_loss": 0.0,
+            "prop_loss": 0.0,
+        }
         skip_batch = False
         stop_epoch_early = False
         for start in range(0, full_batch, micro_batch):
@@ -752,7 +762,7 @@ def train_one_epoch(model: CVAE, loader: DataLoader,
 
         consecutive_nan = 0  # reset on healthy batch
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
         scaler.step(optimizer)
         scaler.update()
         scheduler.step()
@@ -795,6 +805,7 @@ def _log_step(model: CVAE, loss_dict: dict, beta: float, optimizer,
     _, vrate = check_validity(decoded)
 
     recon = loss_dict["recon_loss"].item()
+    raw_kl = loss_dict.get("raw_kl_loss", loss_dict["kl_loss"]).item()
     perp  = math.exp(min(recon, 20))   # cap to avoid overflow display
 
     lr_now = optimizer.param_groups[0]["lr"]
@@ -811,6 +822,9 @@ def _log_step(model: CVAE, loss_dict: dict, beta: float, optimizer,
         "lr":         f"{lr_now:.2e}",
     }
     logger.log_step(row)
+    if raw_kl > 20:
+        global_step = step
+        print(f"[KL WARN] kl={raw_kl:.1f} at step {global_step} — clamped to 50")
     print(f"  [step {step:6d}] loss={row['loss']}  recon={row['recon_loss']}"
           f"  kl={row['kl_loss']}  ppl={row['perplexity']:.1f}"
           f"  valid={row['validity']:.1%}  beta={row['beta']}")
